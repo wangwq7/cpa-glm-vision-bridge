@@ -40,7 +40,7 @@ import (
 
 const pluginID = "glm-vision-combo"
 
-var pluginVersion = "0.7"
+var pluginVersion = "0.7.1"
 var configured atomic.Value
 var telemetry = newEventStore(100)
 
@@ -316,6 +316,7 @@ func metadata() pluginapi.Metadata {
 		{Name: "primary_model", Type: pluginapi.ConfigFieldTypeString, Description: "最终回答始终优先使用的文本模型。"},
 		{Name: "primary_context_tokens", Type: pluginapi.ConfigFieldTypeInteger, Description: "主文本模型理论上下文上限。"},
 		{Name: "primary_context_budget_tokens", Type: pluginapi.ConfigFieldTypeInteger, Description: "主模型实际工作预算，必须低于理论上限。"},
+		{Name: "primary_output_token_limit", Type: pluginapi.ConfigFieldTypeInteger, Description: "最终文本输出上限；保留客户端较小值，缺失或过大时按此值注入或封顶。"},
 		{Name: "text_fallback_models", Type: pluginapi.ConfigFieldTypeArray, Description: "主文本模型失败且尚未输出内容时依次尝试的备用模型。"},
 		{Name: "vision_primary_model", Type: pluginapi.ConfigFieldTypeString, Description: "首选视觉模型；只负责识别，子请求固定 low 思考且不设置输出 token 上限。"},
 		{Name: "vision_backup_model_1", Type: pluginapi.ConfigFieldTypeString, Description: "备用视觉模型 1。"},
@@ -340,7 +341,7 @@ func metadata() pluginapi.Metadata {
 		{Name: "history_attachment_restore_max_attachments", Type: pluginapi.ConfigFieldTypeInteger, Description: "明确引用图片时最多恢复的历史图片数。"},
 		{Name: "auto_compression_enabled", Type: pluginapi.ConfigFieldTypeBoolean, Description: "达到阈值后建立可复用的历史摘要检查点。"},
 		{Name: "auto_compression_threshold_tokens", Type: pluginapi.ConfigFieldTypeInteger, Description: "自动压缩触发阈值；1M 上限、900K 工作预算时推荐 820000。"},
-		{Name: "auto_compression_target_tokens", Type: pluginapi.ConfigFieldTypeInteger, Description: "用于规划历史摘要检查点大小；不会作为模型输出 token 上限下发。"},
+		{Name: "auto_compression_target_tokens", Type: pluginapi.ConfigFieldTypeInteger, Description: "历史摘要检查点目标大小；摘要请求会按该目标加容差后显式设置输出预算。"},
 		{Name: "auto_compression_keep_recent_turns", Type: pluginapi.ConfigFieldTypeInteger, Description: "创建或更新检查点时优先保留原文的最近语义单元数量；完整工具事务不会拆分。"},
 		{Name: "auto_compression_model", Type: pluginapi.ConfigFieldTypeString, Description: "压缩模型；留空使用首选文本模型。"},
 	}}
@@ -357,9 +358,11 @@ func comboModels(cfg runtimeConfig) []pluginapi.ModelInfo {
 	}
 	return []pluginapi.ModelInfo{{
 		ID: name, Object: "model", OwnedBy: pluginID, Type: "chat",
-		DisplayName:   "GLM Vision Bridge",
-		Description:   "视觉模型只负责转写；最终任务始终由首选文本模型及其文本备用链完成。",
-		ContextLength: int64(cfg.PrimaryContextTokens), MaxCompletionTokens: 16384,
+		DisplayName:      "GLM Vision Bridge",
+		Description:      "视觉模型只负责转写；最终任务始终由首选文本模型及其文本备用链完成。",
+		InputTokenLimit:  int64(cfg.PrimaryContextBudgetTokens),
+		OutputTokenLimit: int64(cfg.PrimaryOutputTokenLimit),
+		ContextLength:    int64(cfg.PrimaryContextTokens), MaxCompletionTokens: int64(cfg.PrimaryOutputTokenLimit),
 		SupportedGenerationMethods: []string{"chat"},
 		SupportedInputModalities:   []string{"text", "image"},
 		SupportedOutputModalities:  []string{"text"},
@@ -484,8 +487,17 @@ func executeStream(raw []byte) ([]byte, error) {
 	return okEnvelope(map[string]any{"headers": http.Header{"Content-Type": []string{"text/event-stream"}}})
 }
 
-func prepareTextHostBody(raw []byte, _ string, cfg runtimeConfig, callbackID string, event *comboEvent) ([]byte, error) {
-	return prepareFinalTextBody(raw, cfg, callbackID, event)
+func prepareTextHostBody(raw []byte, protocol string, cfg runtimeConfig, callbackID string, event *comboEvent) ([]byte, error) {
+	body, err := prepareFinalTextBody(raw, cfg, callbackID, event)
+	if err != nil {
+		return nil, err
+	}
+	body, decision, err := applyFinalTextOutputLimit(body, protocol, cfg.PrimaryOutputTokenLimit)
+	if err != nil {
+		return nil, err
+	}
+	cfg.events.stage(event, "最终输出预算", "完成", cfg.PrimaryModel, decision.detail(), time.Now())
+	return body, nil
 }
 
 func normalizeResponsesStringInput(raw []byte, protocol string) ([]byte, bool, error) {

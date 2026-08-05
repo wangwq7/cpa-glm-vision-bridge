@@ -1,5 +1,5 @@
 PLUGIN := glm-vision-combo
-VERSION ?= 0.7
+VERSION ?= 0.7.1
 
 test:
 	go test ./...
@@ -7,7 +7,7 @@ test:
 
 build-linux-amd64:
 	mkdir -p dist
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=c-shared -o dist/$(PLUGIN).so .
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildvcs=false -buildmode=c-shared -o dist/$(PLUGIN).so .
 
 package-linux-amd64: build-linux-amd64
 	cd dist && zip -q $(PLUGIN)_$(VERSION)_linux_amd64.zip $(PLUGIN).so

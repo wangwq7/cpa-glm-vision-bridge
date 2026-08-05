@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -191,8 +192,19 @@ func TestPreparePrimaryBodyNormalizesResponsesStringInputOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(final, got) {
-		t.Fatalf("text preparation normalized a second time:\nfirst=%s\nfinal=%s", got, final)
+	var before, after map[string]any
+	if err := json.Unmarshal(got, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(final, &after); err != nil {
+		t.Fatal(err)
+	}
+	if int(after["max_output_tokens"].(float64)) != cfg.PrimaryOutputTokenLimit {
+		t.Fatalf("max_output_tokens was not injected: %s", final)
+	}
+	delete(after, "max_output_tokens")
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("text preparation changed normalized input beyond its output budget:\nfirst=%#v\nfinal=%#v", before, after)
 	}
 }
 

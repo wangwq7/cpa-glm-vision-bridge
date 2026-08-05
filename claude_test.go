@@ -26,7 +26,7 @@ func TestManagementMetadataMatchesCurrentParameters(t *testing.T) {
 	for _, field := range metadata().ConfigFields {
 		fields[field.Name] = field
 	}
-	for _, name := range []string{"vision_primary_model", "vision_input_token_budget", "vision_timeout_seconds", "vision_cancel_grace_seconds", "auto_compression_target_tokens"} {
+	for _, name := range []string{"primary_output_token_limit", "vision_primary_model", "vision_input_token_budget", "vision_timeout_seconds", "vision_cancel_grace_seconds", "auto_compression_target_tokens"} {
 		if _, ok := fields[name]; !ok {
 			t.Fatalf("management metadata is missing %q", name)
 		}
@@ -37,11 +37,12 @@ func TestManagementMetadataMatchesCurrentParameters(t *testing.T) {
 		}
 	}
 	checks := map[string][]string{
+		"primary_output_token_limit":     {"客户端较小值", "注入或封顶"},
 		"vision_primary_model":           {"固定 low", "不设置输出 token 上限"},
 		"vision_input_token_budget":      {"输入预算", "不是输出 token 上限"},
 		"vision_timeout_seconds":         {"stream ID", "Host ABI"},
 		"vision_cancel_grace_seconds":    {"仅在 stream_close 后", "不增加正常请求延迟"},
-		"auto_compression_target_tokens": {"摘要检查点", "不会作为模型输出 token 上限"},
+		"auto_compression_target_tokens": {"摘要检查点", "显式设置输出预算"},
 	}
 	for name, parts := range checks {
 		for _, part := range parts {

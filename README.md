@@ -1,6 +1,6 @@
 # CPA GLM Vision Bridge
 
-`v0.7` 是适用于 CLIProxyAPI v7（CPA）的原生视觉桥接插件。它让不支持图片的长上下文文本模型继续担任主模型：视觉模型只负责把图片转换成受控文本，最终理解、推理和回答仍由 GLM 等首选文本模型完成。
+`v0.7.1` 是适用于 CLIProxyAPI v7（CPA）的原生视觉桥接插件。它让不支持图片的长上下文文本模型继续担任主模型：视觉模型只负责把图片转换成受控文本，最终理解、推理和回答仍由 GLM 等首选文本模型完成。
 
 仓库包含完整 Go 源码、测试、中文管理页面、配置迁移脚本和 Linux amd64 构建脚本。
 
@@ -60,6 +60,7 @@ Agent、Claude Code、Codex 或其他 OpenAI/Claude 兼容客户端只需把 `mo
 - 自动历史压缩只在安全语义边界执行：OpenAI Responses、OpenAI Chat 和 Claude Messages 的工具调用与结果不会被拆到摘要边界两侧；未完成的工具事务继续留在原始后缀。
 - 长会话首次达到阈值时建立可持久复用的历史摘要检查点；后续追加少量对话直接复用，只有新增尾部再次逼近预算时才按完整语义轮次和工具事务增量更新一次。
 - 纯文本大请求使用单遍 JSON/媒体扫描，不再先构造完整动态对象；不会向 GLM、GPT、Claude、Gemini、Grok 等上游注入任何厂商私有缓存字段。
+- 最终文本输出预算按客户端协议下发：保留客户端较小值，未提供时注入 `primary_output_token_limit`，过大时按该配置封顶，避免 CPA Host 对缺失字段使用较低默认值。
 - 图片中的文字被标记为 `gateway-generated / untrusted`，表示它是外部不可信数据，主模型不得把图片内的指令当成系统指令执行。
 - 所有图片替换后执行残留媒体检查；未知图片结构和 PDF 会在进入主文本模型前明确失败，不会静默透传。
 - **文本链与视觉链禁止使用相同模型名**；冲突时配置校验失败，管理页保存会直接提示错误。
@@ -93,6 +94,7 @@ plugins:
       primary_model: glm-5.2
       primary_context_tokens: 1000000
       primary_context_budget_tokens: 900000
+      primary_output_token_limit: 64000
       # 文本备用链：不要与下方视觉模型重复
       text_fallback_models:
         - gpt-5.5
@@ -118,7 +120,7 @@ plugins:
       auto_compression_target_tokens: 12000
       auto_compression_keep_recent_turns: 8
       auto_compression_model: ""
-      # v0.7 仅在完整语义轮次和工具事务边界压缩；820K 到 900K 保留约 80K 安全余量
+      # v0.7 仅在完整语义轮次和工具事务边界压缩；900K 输入预算 + 64K 输出上限仍低于 1M 总窗口
 
       cache_ttl_seconds: 259200
       cache_max_entries: 2000
@@ -142,7 +144,8 @@ plugins:
 | `combo_model` | 对客户端暴露的**唯一**虚拟模型名 | 默认 `glm-5.2-vision-combo` |
 | `primary_model` | 最终回答的首选文本模型 | 使用长上下文、推理稳定的模型 |
 | `primary_context_tokens` | 文本模型理论上下文上限 | 当前 GLM-5.2 配置填 `1000000` |
-| `primary_context_budget_tokens` | 实际工作安全线 | 1M 上限推荐 `900000`，预留输出和协议开销 |
+| `primary_context_budget_tokens` | 主文本输入工作安全线 | 1M 上限推荐 `900000` |
+| `primary_output_token_limit` | 最终文本输出上限 | 推荐 `64000`；保留客户端较小值，缺失或过大时注入/封顶 |
 | `text_fallback_models` | 文本模型首包前失败后的备用链 | 可留空；**禁止**与视觉链模型重复 |
 | `vision_primary_model` | 第一视觉模型 | 优先低延迟、OCR 稳定的模型 |
 | `vision_backup_model_1..3` | 顺序视觉备用链 | 可留空；最多四个视觉候选；**禁止**与文本链重复 |
@@ -155,7 +158,7 @@ plugins:
 | `history_attachment_restore_max_attachments` | 追问旧图时最多恢复数量 | 推荐 1–2，避免上下文突然膨胀 |
 | `max_concurrent_extractions` | 多图识别并发数 | 推荐 1–2；提高会增加瞬时请求和费用 |
 | `auto_compression_threshold_tokens` | 自动压缩触发线 | 900K 工作预算推荐 `820000`，保留约 80K 安全余量 |
-| `auto_compression_target_tokens` | 历史摘要规划大小 | 推荐 `12000`；不会作为模型输出 token 上限下发 |
+| `auto_compression_target_tokens` | 历史摘要检查点目标大小 | 推荐 `12000`；摘要请求按目标增加容差并显式设置输出预算 |
 | `cache_ttl_seconds` | 识别文本缓存时长 | 默认 72 小时 |
 | `cache_max_entries` | 缓存最大条数 | 超出后按 LRU 淘汰 |
 | `max_image_data_bytes` | data URL 解码后单图上限 | 默认 12 MiB |
@@ -190,7 +193,7 @@ make package-linux-amd64
 
 ```text
 dist/glm-vision-combo.so
-dist/glm-vision-combo_0.5_linux_amd64.zip
+dist/glm-vision-combo_0.7.1_linux_amd64.zip
 dist/checksums.txt
 ```
 
@@ -207,7 +210,7 @@ dist/checksums.txt
 3. 保留原文件为带版本和时间的 `.bak`，不要直接覆盖后删除。
 4. 确认 `config.yaml` 中 `combo_model` 为唯一对外名，且文本链/视觉链无重复模型。
 5. 重启 CPA 或重新加载插件。
-6. 在日志中确认 `GLM Vision Bridge version=0.7`。
+6. 在日志中确认 `GLM Vision Bridge version=0.7.1`。
 7. 请求 `/v1/models`，确认**仅**存在配置的 `combo_model`。
 8. 依次测试纯文本、首次截图、同图缓存、无关文本和追问旧图。
 
@@ -237,7 +240,7 @@ python3 migrate-config-v030.py /path/to/config.yaml
 - 将最快且稳定的视觉模型放在第一位，备用模型只在失败后调用。
 - 单图场景不要盲目提高并发；`max_concurrent_extractions: 2` 主要用于多图请求。
 - 保持 `history_attachment_mode: onDemand`，减少非发图轮的上下文和费用。
-- 模型切换后的第一轮会丢失原供应商的前缀缓存；v0.7 不再通过独立删除工具轨迹来提速，历史压缩仅在达到阈值且位于安全语义边界时执行。
+- 模型切换后的第一轮会丢失原供应商的前缀缓存；v0.7.1 不再通过独立删除工具轨迹来提速，历史压缩仅在达到阈值且位于安全语义边界时执行。
 - 首次超长会话会创建摘要检查点；之后正常追加问答应出现“复用历史压缩检查点”，不再每轮调用压缩模型。
 - 不要把 1M 主模型预算复制给 256K 视觉模型；视觉模型只需要当前问题附近文字和图片。
 - 远程 URL 内容可能变化，因此不会进入持久内容缓存；需要稳定缓存时优先上传 data URL/实际图片内容。
@@ -261,6 +264,13 @@ CPA 插件和 9router Vision Bridge 使用相同的核心策略：主文本模�
 - 图片识别结果属于模型生成内容，可能有 OCR 错误；最终模型应保留不确定性说明。
 
 ## 版本说明
+
+### v0.7.1
+
+- 修复 CLIProxyAPI v7.2.119 Claude Executor 在最终请求缺少 `max_tokens` 时回落到 1024 token、导致长回答以 `stop_reason=max_tokens` 截断的问题。
+- OpenAI Chat、OpenAI Responses 与 Claude Messages 分别使用正确的顶层输出字段；客户端较小预算保持不变，缺失值注入 64K 默认值，过大值按插件配置封顶，工具 Schema 内的同名属性不受影响。
+- 历史摘要请求显式设置目标加容差后的输出预算，避免压缩模型同样回落到 1024 token。
+- 模型元数据、管理页、上下文余量校验和事件时间线同步展示最终输出预算。
 
 ### v0.7
 

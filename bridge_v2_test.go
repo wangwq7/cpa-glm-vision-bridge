@@ -367,7 +367,7 @@ func TestManagementPageContainsUnifiedControls(t *testing.T) {
 	runtime.VisionTimeoutSeconds = 30
 	runtime.VisionCancelGraceSeconds = 25
 	html := managementHTML(runtime)
-	for _, want := range []string{"视觉桥接 v0.7", "OpenAI Chat", "Responses", "Claude Messages", "路由预览", "历史图片策略", "v0.7 安全历史压缩", "v0.7 推荐长上下文方案", "应用推荐值", "820,000", "当前安全余量", "摘要边界不会切断调用与结果", "摘要检查点", "固定归档标记", "文本备用模型 1", "固定 low 思考", "不设置输出 token 上限", "按实际截图的准确率和完成耗时排序", "可取消识别超时", "填写 30", "首包前仍受 Host ABI 限制", "取消确认等待", "填写 25", "正常请求不增加此延迟", "setValue('vision_cancel_grace_seconds',C.vision_cancel_grace_seconds)", "vision_cancel_grace_seconds:n('vision_cancel_grace_seconds')", `"vision_timeout_seconds":30`, `"vision_cancel_grace_seconds":25`, "缓存键包含图片与附近任务", "保存并重新加载插件"} {
+	for _, want := range []string{"视觉桥接 v0.7.1", "OpenAI Chat", "Responses", "Claude Messages", "路由预览", "历史图片策略", "v0.7 安全历史压缩", "v0.7 推荐长上下文方案", "应用推荐值", "64,000 输出上限", "最终文本输出上限", "客户端较小值保留", "820,000", "当前安全余量", "摘要边界不会切断调用与结果", "摘要检查点", "显式设置输出预算", "固定归档标记", "文本备用模型 1", "固定 low 思考", "不设置输出 token 上限", "按实际截图的准确率和完成耗时排序", "可取消识别超时", "填写 30", "首包前仍受 Host ABI 限制", "取消确认等待", "填写 25", "正常请求不增加此延迟", "setValue('primary_output_token_limit',C.primary_output_token_limit)", "primary_output_token_limit:n('primary_output_token_limit')", "setValue('vision_cancel_grace_seconds',C.vision_cancel_grace_seconds)", "vision_cancel_grace_seconds:n('vision_cancel_grace_seconds')", `"primary_output_token_limit":64000`, `"vision_timeout_seconds":30`, `"vision_cancel_grace_seconds":25`, "缓存键包含图片与附近任务", "保存并重新加载插件"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing %q", want)
 		}
@@ -383,6 +383,9 @@ func TestManagementPageContainsUnifiedControls(t *testing.T) {
 		}
 	}
 	for snippet, wantCount := range map[string]int{
+		`name="primary_output_token_limit"`:                                     1,
+		"setValue('primary_output_token_limit',C.primary_output_token_limit)":   1,
+		"primary_output_token_limit:n('primary_output_token_limit')":            1,
 		`name="vision_cancel_grace_seconds"`:                                    1,
 		"setValue('vision_cancel_grace_seconds',C.vision_cancel_grace_seconds)": 1,
 		"vision_cancel_grace_seconds:n('vision_cancel_grace_seconds')":          1,
@@ -410,5 +413,8 @@ func TestSingleComboModelIsExposed(t *testing.T) {
 	if len(models) != 1 || models[0].ID != "glm-5.2-vision-combo" {
 		raw, _ := json.Marshal(models)
 		t.Fatalf("expected only combo_model, got %s", raw)
+	}
+	if models[0].InputTokenLimit != int64(runtime.PrimaryContextBudgetTokens) || models[0].OutputTokenLimit != int64(runtime.PrimaryOutputTokenLimit) || models[0].MaxCompletionTokens != int64(runtime.PrimaryOutputTokenLimit) {
+		t.Fatalf("unexpected combo token metadata: %#v", models[0])
 	}
 }

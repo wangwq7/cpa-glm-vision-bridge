@@ -26,6 +26,7 @@ block = """    glm-vision-combo:
       primary_model: glm-5.2
       primary_context_tokens: 1048576
       primary_context_budget_tokens: 930000
+      primary_output_token_limit: 64000
       text_fallback_models:
         - gpt-5.5
         - gpt-5.6-sol

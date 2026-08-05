@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -16,13 +15,6 @@ type historySummarizerFunc func(string, runtimeConfig, string, *comboEvent) (str
 func estimateBodyTokens(body []byte) int { return (len(body) + 2) / 3 }
 
 func prepareFinalTextBody(raw []byte, cfg runtimeConfig, callbackID string, event *comboEvent) ([]byte, error) {
-	raw, removedOutputLimits, err := removeFinalTextOutputLimits(raw)
-	if err != nil {
-		return nil, err
-	}
-	if len(removedOutputLimits) > 0 {
-		cfg.events.stage(event, "移除最终输出上限", "完成", cfg.PrimaryModel, "已移除客户端顶层 "+strings.Join(removedOutputLimits, "、")+"，让最终文本模型自然结束；客户端思考配置和视觉子请求的 low 思考策略保持不变。", time.Now())
-	}
 	initialTokens := estimateBodyTokens(raw)
 	cfg.events.stage(event, "文本上下文预检", "完成", cfg.PrimaryModel, fmt.Sprintf("附件处理后请求约 %d token；自动压缩阈值 %d，主模型工作预算 %d。", initialTokens, cfg.AutoCompressionThresholdTokens, cfg.PrimaryContextBudgetTokens), time.Now())
 	if initialTokens < cfg.AutoCompressionThresholdTokens {
@@ -114,37 +106,65 @@ func prepareFinalTextBody(raw []byte, cfg runtimeConfig, callbackID string, even
 	return encoded, nil
 }
 
-func removeFinalTextOutputLimits(raw []byte) ([]byte, []string, error) {
-	limitKeys := []string{"max_tokens", "max_output_tokens", "max_completion_tokens"}
-	mayContainLimit := false
-	for _, key := range limitKeys {
-		if bytes.Contains(raw, []byte(`"`+key+`"`)) {
-			mayContainLimit = true
-			break
-		}
+type finalTextOutputLimitDecision struct {
+	Field           string
+	ClientLimit     int
+	ConfiguredLimit int
+	EffectiveLimit  int
+}
+
+func applyFinalTextOutputLimit(raw []byte, protocol string, configuredLimit int) ([]byte, finalTextOutputLimitDecision, error) {
+	adapter, err := adapterForProtocol(protocol)
+	if err != nil {
+		return nil, finalTextOutputLimitDecision{}, err
 	}
-	if !mayContainLimit {
-		return raw, nil, nil
+	if configuredLimit <= 0 {
+		return nil, finalTextOutputLimitDecision{}, fmt.Errorf("primary output token limit must be positive")
 	}
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &root); err != nil {
-		return nil, nil, fmt.Errorf("cannot remove final text output limits from invalid request JSON: %w", err)
+		return nil, finalTextOutputLimitDecision{}, fmt.Errorf("cannot apply final text output limit to invalid request JSON: %w", err)
 	}
-	removed := make([]string, 0, len(limitKeys))
-	for _, key := range limitKeys {
-		if _, exists := root[key]; exists {
-			delete(root, key)
-			removed = append(removed, key)
+	if root == nil {
+		return nil, finalTextOutputLimitDecision{}, fmt.Errorf("cannot apply final text output limit: top-level JSON value must be an object")
+	}
+	field := adapter.finalOutputLimitField()
+	clientLimit := 0
+	for _, key := range adapter.clientOutputLimitFields() {
+		var value int
+		if json.Unmarshal(root[key], &value) == nil && value > 0 && (clientLimit == 0 || value < clientLimit) {
+			clientLimit = value
 		}
 	}
-	if len(removed) == 0 {
-		return raw, nil, nil
+	effectiveLimit := configuredLimit
+	if clientLimit > 0 && clientLimit < effectiveLimit {
+		effectiveLimit = clientLimit
 	}
+	for _, key := range finalTextOutputLimitKeys {
+		delete(root, key)
+	}
+	root[field], _ = json.Marshal(effectiveLimit)
 	encoded, err := json.Marshal(root)
 	if err != nil {
-		return nil, nil, fmt.Errorf("cannot encode final text request without output limits: %w", err)
+		return nil, finalTextOutputLimitDecision{}, fmt.Errorf("cannot encode final text request with output limit: %w", err)
 	}
-	return encoded, removed, nil
+	return encoded, finalTextOutputLimitDecision{
+		Field:           field,
+		ClientLimit:     clientLimit,
+		ConfiguredLimit: configuredLimit,
+		EffectiveLimit:  effectiveLimit,
+	}, nil
+}
+
+func (d finalTextOutputLimitDecision) detail() string {
+	switch {
+	case d.ClientLimit <= 0:
+		return fmt.Sprintf("客户端未提供有效输出上限；已通过顶层 %s 注入 %d token，避免 CPA Host 将缺失值替换为较低默认值。", d.Field, d.EffectiveLimit)
+	case d.ClientLimit > d.ConfiguredLimit:
+		return fmt.Sprintf("客户端请求 %d token；已通过顶层 %s 按插件上限封顶为 %d token。", d.ClientLimit, d.Field, d.EffectiveLimit)
+	default:
+		return fmt.Sprintf("保留客户端 %d token 输出预算并通过顶层 %s 下发；插件配置上限为 %d token。", d.EffectiveLimit, d.Field, d.ConfiguredLimit)
+	}
 }
 
 func conversationField(root map[string]any) (string, []any, bool) {
@@ -385,8 +405,9 @@ func historySummaryTokenLimit(target int) int {
 
 func makeHistoryCompressionRequest(model, history string, target int) []byte {
 	body, _ := json.Marshal(map[string]any{
-		"model":  model,
-		"stream": false,
+		"model":      model,
+		"stream":     false,
+		"max_tokens": historySummaryTokenLimit(target),
 		"messages": []any{
 			map[string]any{"role": "system", "content": compressionInstruction(target)},
 			map[string]any{"role": "user", "content": "<history-data>\n" + history + "\n</history-data>"},

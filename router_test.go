@@ -25,6 +25,9 @@ func TestDefaultConfigUsesBenchmarkedProductionProfile(t *testing.T) {
 	if cfg.PrimaryModel != "glm-5.2" || len(cfg.TextFallbackModels) != 2 || cfg.TextFallbackModels[0] != "gpt-5.5" || cfg.TextFallbackModels[1] != "gpt-5.6-sol" {
 		t.Fatalf("unexpected text chain: primary=%q fallbacks=%#v", cfg.PrimaryModel, cfg.TextFallbackModels)
 	}
+	if cfg.PrimaryOutputTokenLimit != 64000 {
+		t.Fatalf("primary output limit=%d, want 64000", cfg.PrimaryOutputTokenLimit)
+	}
 	wantVision := []string{"gemini-3.1-flash-lite", "gpt-5.6-terra", "grok-4.5", "claude-sonnet-4-6"}
 	if len(cfg.VisionModels) != len(wantVision) {
 		t.Fatalf("unexpected visual chain: %#v", cfg.VisionModels)
@@ -36,6 +39,27 @@ func TestDefaultConfigUsesBenchmarkedProductionProfile(t *testing.T) {
 	}
 	if cfg.VisionTimeoutSeconds != 20 || cfg.VisionCancelGraceSeconds != 15 {
 		t.Fatalf("unexpected visual timing: timeout=%d grace=%d", cfg.VisionTimeoutSeconds, cfg.VisionCancelGraceSeconds)
+	}
+}
+
+func TestPrimaryOutputLimitUsesAndValidatesContextHeadroom(t *testing.T) {
+	cfg := defaultPluginConfig()
+	cfg.PrimaryContextTokens = 128000
+	cfg.PrimaryContextBudgetTokens = 100000
+	cfg.PrimaryOutputTokenLimit = 0
+	cfg.AutoCompressionThresholdTokens = 90000
+
+	got, err := normalizeConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PrimaryOutputTokenLimit != 28000 {
+		t.Fatalf("default output limit=%d, want available headroom 28000", got.PrimaryOutputTokenLimit)
+	}
+
+	cfg.PrimaryOutputTokenLimit = 30000
+	if _, err := normalizeConfig(cfg); err == nil || !strings.Contains(err.Error(), "primary_output_token_limit") {
+		t.Fatalf("expected output headroom validation error, got %v", err)
 	}
 }
 

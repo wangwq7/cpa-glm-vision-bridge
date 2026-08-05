@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -149,7 +150,7 @@ func TestTextContextPrecheckEventIsRecordedBelowCompressionThreshold(t *testing.
 	assertEventStage(t, cfg.events, event.ID, "文本上下文预检")
 }
 
-func TestToolTrajectoriesRemainByteIdenticalBelowCompressionThreshold(t *testing.T) {
+func TestToolTrajectoriesRemainStructurallyIdenticalBelowCompressionThreshold(t *testing.T) {
 	largeResult := strings.Repeat("tool-result-", 800)
 	responsesInput := []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "finish the task"}}}}
 	chatMessages := []any{map[string]any{"role": "user", "content": "finish the task"}}
@@ -198,14 +199,30 @@ func TestToolTrajectoriesRemainByteIdenticalBelowCompressionThreshold(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(got) != string(test.raw) {
-				t.Fatalf("tool history changed below compression threshold: before=%d after=%d", len(test.raw), len(got))
+			var before, after map[string]any
+			if err := json.Unmarshal(test.raw, &before); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(got, &after); err != nil {
+				t.Fatal(err)
+			}
+			adapter, err := adapterForProtocol(test.protocol)
+			if err != nil {
+				t.Fatal(err)
+			}
+			limitField := adapter.finalOutputLimitField()
+			if gotLimit := int(after[limitField].(float64)); gotLimit != cfg.PrimaryOutputTokenLimit {
+				t.Fatalf("%s=%d, want %d", limitField, gotLimit, cfg.PrimaryOutputTokenLimit)
+			}
+			delete(after, limitField)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("tool history changed below compression threshold: before=%#v after=%#v", before, after)
 			}
 		})
 	}
 }
 
-func TestFinalTextBodyRemovesOnlyTopLevelOutputLimits(t *testing.T) {
+func TestFinalTextBodyAppliesOnlyTopLevelOutputLimit(t *testing.T) {
 	cfg := testRuntime()
 	defer cfg.cache.close()
 	event := cfg.events.begin("combo", "glm", false)
@@ -220,7 +237,7 @@ func TestFinalTextBodyRemovesOnlyTopLevelOutputLimits(t *testing.T) {
 		"tools":[{"type":"function","function":{"name":"run","parameters":{"type":"object","properties":{"max_tokens":{"type":"integer"},"max_output_tokens":{"type":"integer"},"max_completion_tokens":{"type":"integer"}}}}}]
 	}`)
 
-	got, err := prepareFinalTextBody(raw, cfg, "", event)
+	got, err := prepareTextHostBody(raw, "openai", cfg, "", event)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,9 +245,12 @@ func TestFinalTextBodyRemovesOnlyTopLevelOutputLimits(t *testing.T) {
 	if err := json.Unmarshal(got, &root); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"max_tokens", "max_output_tokens", "max_completion_tokens"} {
+	if root["max_tokens"] != float64(50) {
+		t.Fatalf("effective output limit changed: %s", got)
+	}
+	for _, key := range []string{"max_output_tokens", "max_completion_tokens"} {
 		if _, exists := root[key]; exists {
-			t.Fatalf("top-level %s was retained: %s", key, got)
+			t.Fatalf("conflicting top-level %s was retained: %s", key, got)
 		}
 	}
 	if root["reasoning_effort"] != "xhigh" {
@@ -245,7 +265,7 @@ func TestFinalTextBodyRemovesOnlyTopLevelOutputLimits(t *testing.T) {
 			t.Fatalf("nested tool schema field %s was changed: %s", nested, got)
 		}
 	}
-	assertEventStage(t, cfg.events, event.ID, "移除最终输出上限")
+	assertEventStage(t, cfg.events, event.ID, "最终输出预算")
 }
 
 func TestFinalTextBodyWithoutTopLevelOutputLimitsRemainsByteIdentical(t *testing.T) {
@@ -261,17 +281,29 @@ func TestFinalTextBodyWithoutTopLevelOutputLimitsRemainsByteIdentical(t *testing
 	}
 }
 
-func TestProtocolFinalTextBodiesRemoveClientOutputLimits(t *testing.T) {
+func TestFinalTextOutputLimitRejectsNullTopLevelRequest(t *testing.T) {
+	cfg := testRuntime()
+	defer cfg.cache.close()
+	_, err := prepareTextHostBody([]byte("null"), "openai", cfg, "", cfg.events.begin("combo", "glm", false))
+	if err == nil || !strings.Contains(err.Error(), "top-level JSON value must be an object") {
+		t.Fatalf("expected object validation error, got %v", err)
+	}
+}
+
+func TestProtocolFinalTextBodiesApplyEffectiveOutputLimit(t *testing.T) {
 	tests := []struct {
-		name     string
-		protocol string
-		limitKey string
-		raw      string
+		name      string
+		protocol  string
+		raw       string
+		wantKey   string
+		wantLimit int
 	}{
-		{name: "OpenAI Chat max_tokens", protocol: "openai", limitKey: "max_tokens", raw: `{"model":"combo","max_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`},
-		{name: "OpenAI Chat max_completion_tokens", protocol: "openai", limitKey: "max_completion_tokens", raw: `{"model":"combo","max_completion_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`},
-		{name: "OpenAI Responses", protocol: "openai-response", limitKey: "max_output_tokens", raw: `{"model":"combo","max_output_tokens":64,"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`},
-		{name: "Anthropic Messages", protocol: "claude", limitKey: "max_tokens", raw: `{"model":"combo","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`},
+		{name: "OpenAI Chat max_tokens", protocol: "openai", raw: `{"model":"combo","max_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
+		{name: "OpenAI Chat max_completion_tokens", protocol: "openai", raw: `{"model":"combo","max_completion_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
+		{name: "OpenAI Responses", protocol: "openai-response", raw: `{"model":"combo","max_output_tokens":64,"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_output_tokens", wantLimit: 64},
+		{name: "Anthropic Messages", protocol: "claude", raw: `{"model":"combo","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
+		{name: "OpenAI Chat missing limit", protocol: "openai", raw: `{"model":"combo","messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64000},
+		{name: "Anthropic Messages capped", protocol: "claude", raw: `{"model":"combo","max_tokens":100000,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64000},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -285,8 +317,15 @@ func TestProtocolFinalTextBodiesRemoveClientOutputLimits(t *testing.T) {
 			if err := json.Unmarshal(got, &root); err != nil {
 				t.Fatal(err)
 			}
-			if _, exists := root[test.limitKey]; exists {
-				t.Fatalf("%s retained %s: %s", test.protocol, test.limitKey, got)
+			for _, key := range finalTextOutputLimitKeys {
+				value, exists := root[key]
+				if key == test.wantKey {
+					if !exists || int(value.(float64)) != test.wantLimit {
+						t.Fatalf("%s=%v, want %d: %s", key, value, test.wantLimit, got)
+					}
+				} else if exists {
+					t.Fatalf("conflicting %s retained: %s", key, got)
+				}
 			}
 			metadata, _ := root["metadata"].(map[string]any)
 			if metadata["trace"] != "keep-me" {
@@ -296,14 +335,14 @@ func TestProtocolFinalTextBodiesRemoveClientOutputLimits(t *testing.T) {
 	}
 }
 
-func TestHistoryCompressionRequestHasNoMaxTokens(t *testing.T) {
+func TestHistoryCompressionRequestHasExplicitOutputBudget(t *testing.T) {
 	raw := makeHistoryCompressionRequest("glm", `[{"role":"user","content":"history"}]`, 12000)
 	var root map[string]any
 	if err := json.Unmarshal(raw, &root); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := root["max_tokens"]; exists {
-		t.Fatalf("compression request retained top-level max_tokens: %s", raw)
+	if got := int(root["max_tokens"].(float64)); got != 15000 {
+		t.Fatalf("compression max_tokens=%d, want 15000: %s", got, raw)
 	}
 	if root["stream"] != false || root["model"] != "glm" {
 		t.Fatalf("unexpected compression request: %s", raw)

@@ -69,6 +69,7 @@ type pluginConfig struct {
 	PrimaryModel                   string        `yaml:"primary_model"`
 	PrimaryContextTokens           int           `yaml:"primary_context_tokens"`
 	PrimaryContextBudgetTokens     int           `yaml:"primary_context_budget_tokens"`
+	PrimaryOutputTokenLimit        int           `yaml:"primary_output_token_limit"`
 	TextFallbackModels             []string      `yaml:"text_fallback_models"`
 	VisionPrimaryModel             string        `yaml:"vision_primary_model"`
 	VisionBackupModel1             string        `yaml:"vision_backup_model_1"`
@@ -121,6 +122,7 @@ func defaultPluginConfig() pluginConfig {
 		VisionBackupModel3:             "claude-sonnet-4-6",
 		PrimaryContextTokens:           1000000,
 		PrimaryContextBudgetTokens:     900000,
+		PrimaryOutputTokenLimit:        64000,
 		VisionPrompt:                   defaultVisionPrompt,
 		VisionInputTokenBudget:         1200,
 		VisionImageTokenReserve:        4096,
@@ -166,6 +168,12 @@ func normalizeConfig(cfg pluginConfig) (pluginConfig, error) {
 	defaultString(&cfg.CachePath, def.CachePath)
 	defaultInt(&cfg.PrimaryContextTokens, def.PrimaryContextTokens)
 	defaultInt(&cfg.PrimaryContextBudgetTokens, def.PrimaryContextBudgetTokens)
+	if cfg.PrimaryOutputTokenLimit <= 0 {
+		cfg.PrimaryOutputTokenLimit = def.PrimaryOutputTokenLimit
+		if headroom := cfg.PrimaryContextTokens - cfg.PrimaryContextBudgetTokens; headroom > 0 && cfg.PrimaryOutputTokenLimit > headroom {
+			cfg.PrimaryOutputTokenLimit = headroom
+		}
+	}
 	defaultInt(&cfg.VisionInputTokenBudget, def.VisionInputTokenBudget)
 	defaultInt(&cfg.VisionImageTokenReserve, def.VisionImageTokenReserve)
 	defaultInt(&cfg.VisionContextLimit, def.VisionContextLimit)
@@ -184,6 +192,9 @@ func normalizeConfig(cfg pluginConfig) (pluginConfig, error) {
 	defaultInt(&cfg.AutoCompressionKeepRecentTurns, def.AutoCompressionKeepRecentTurns)
 	if cfg.PrimaryContextBudgetTokens >= cfg.PrimaryContextTokens {
 		return cfg, fmt.Errorf("primary_context_budget_tokens must be lower than primary_context_tokens")
+	}
+	if cfg.PrimaryOutputTokenLimit > cfg.PrimaryContextTokens-cfg.PrimaryContextBudgetTokens {
+		return cfg, fmt.Errorf("primary_output_token_limit must fit between primary_context_budget_tokens and primary_context_tokens")
 	}
 	if cfg.AutoCompressionThresholdTokens >= cfg.PrimaryContextBudgetTokens {
 		return cfg, fmt.Errorf("auto_compression_threshold_tokens must be lower than primary_context_budget_tokens")

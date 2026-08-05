@@ -45,6 +45,26 @@ var protocolAdapters = map[string]protocolAdapter{
 	},
 }
 
+var finalTextOutputLimitKeys = []string{"max_tokens", "max_output_tokens", "max_completion_tokens"}
+
+func (a protocolAdapter) clientOutputLimitFields() []string {
+	switch a.protocol {
+	case protocolResponses:
+		return []string{"max_output_tokens"}
+	case protocolOpenAIChat:
+		return []string{"max_completion_tokens", "max_tokens"}
+	default:
+		return []string{"max_tokens"}
+	}
+}
+
+func (a protocolAdapter) finalOutputLimitField() string {
+	if a.protocol == protocolResponses {
+		return "max_output_tokens"
+	}
+	return "max_tokens"
+}
+
 // normalizeProtocol maps host protocol aliases to the canonical values
 // declared in the plugin ABI. SourceFormat remains authoritative when present.
 func normalizeProtocol(value string) string {
