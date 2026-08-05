@@ -78,18 +78,20 @@ input[type=checkbox]{width:auto;height:auto;accent-color:var(--blue)}
 .flow-chain .vc .vn{font-weight:600}.flow-chain .vc .vs{color:var(--sub)}
 
 /* Events */
-.ev-list{display:grid;gap:8px}
-.ev-item{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer;transition:.12s}
+.ev-layout{display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start}
+.ev-list{display:grid;gap:6px;max-height:calc(100vh - 280px);overflow-y:auto;padding-right:4px}
+.ev-item{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;transition:.1s}
 .ev-item:hover{border-color:var(--blue)}
-.ev-item.sel{border-color:var(--blue);background:var(--blue-bg)}
+.ev-item.sel{border-color:var(--blue);background:var(--blue-bg);box-shadow:0 0 0 2px rgba(59,111,212,.08)}
 .ev-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
-.ev-id{font:600 12px ui-monospace,monospace}
-.ev-meta{font-size:11px;color:var(--sub);margin-top:3px}
-.badge-s{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap}
+.ev-id{font:600 11px ui-monospace,monospace}
+.ev-meta{font-size:10px;color:var(--sub);margin-top:2px}
+.badge-s{font-size:10px;padding:1px 6px;border-radius:20px;font-weight:600;white-space:nowrap}
 .badge-s.完成{background:var(--green-bg);color:var(--green)}
 .badge-s.失败{background:var(--red-bg);color:var(--red)}
 .badge-s.进行中{background:var(--amber-bg);color:var(--amber)}
-.ev-stages{margin-top:16px}
+.ev-detail-panel{position:sticky;top:20px}
+.ev-stages{margin-top:12px}
 .stage{display:grid;grid-template-columns:auto 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--soft)}
 .stage:last-child{border:0}
 .stage-dot{width:8px;height:8px;border-radius:50%;margin-top:5px}
@@ -100,6 +102,7 @@ input[type=checkbox]{width:auto;height:auto;accent-color:var(--blue)}
 .stage-side .sm{font:11px ui-monospace,monospace;background:var(--soft);padding:1px 5px;border-radius:4px;display:inline-block;margin-bottom:2px}
 .ev-error{background:var(--red-bg);color:var(--red);padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:12px}
 .empty{text-align:center;padding:40px 20px;color:var(--sub);font-size:13px}
+.ev-empty-detail{display:flex;align-items:center;justify-content:center;min-height:300px;color:var(--sub);font-size:13px}
 
 /* Save bar */
 .savebar{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -2px 12px rgba(0,0,0,.06);z-index:50}
@@ -118,6 +121,9 @@ input.key{width:160px;height:36px;font-size:12px}
 .grid .span2{grid-column:span 1}
 .flow{flex-direction:column}.flow-arrow{transform:rotate(90deg);justify-content:center;padding:4px 0}
 .vtbl{font-size:12px}
+.ev-layout{grid-template-columns:1fr}
+.ev-detail-panel{position:static}
+.ev-list{max-height:240px}
 .savebar-inner{flex-wrap:wrap}
 }
 </style>
@@ -249,8 +255,10 @@ input.key{width:160px;height:36px;font-size:12px}
 
   <!-- Events -->
   <div id="events" class="view">
-    <div id="evList" class="ev-list"></div>
-    <div id="evDetail"></div>
+    <div class="ev-layout">
+      <div id="evList" class="ev-list"></div>
+      <div id="evDetail" class="ev-detail-panel"></div>
+    </div>
   </div>
 </div>
 
@@ -276,7 +284,7 @@ function renderV(){const cf=c.vision_models||[];$('#vrows').innerHTML=Array.from
 
 function renderPreview(){const pm=vv('public_model').trim()||'—',pr=vv('primary_model')||'—',fb=['text_fallback_0','text_fallback_1','text_fallback_2'].map(vv).filter(Boolean),vs=vFromForm();$('#s1').textContent=pm;$('#s2').textContent=pr;$('#s3').textContent=vs[0]?.model||'—';$('#f1').textContent=pm;$('#f2').textContent=vv('history_attachment_mode')==='retain'?'全部保留':'按需恢复';$('#f3').textContent=vs.map(m=>m.model).join(' → ')||'—';$('#f4').textContent=[pr,...fb].join(' → ')||'—';const ctx=nv('primary_context_tokens'),inp=nv('primary_context_budget_tokens'),out=nv('primary_output_token_limit'),th=nv('auto_compression_threshold_tokens'),tg=nv('auto_compression_target_tokens');const ok=ctx>inp&&inp+out<=ctx&&inp>th&&th>tg;const b=$('#budget');b.className='budget '+(ok?'ok':'bad');b.innerHTML=ok?`✓ 输入 ${inp.toLocaleString()} + 输出 ${out.toLocaleString()} = ${(inp+out).toLocaleString()}，余量 ${(ctx-inp-out).toLocaleString()}`:`✗ 需满足：总上下文 > 输入预算 > 压缩阈值 > 摘要目标，且输入+输出 ≤ 总上下文`}
 
-function renderEv(){if(!ev.length){$('#evList').innerHTML='<div class="empty">尚无请求事件</div>';$('#evDetail').innerHTML='';return}let sel=ev[0].id;const show=()=>{$('#evList').innerHTML=ev.map(e=>`<div class="ev-item ${e.id===sel?'sel':''}" data-ei="${esc(e.id)}"><div class="ev-row"><span class="ev-id">${esc(e.id)}</span><span class="badge-s ${esc(e.status)}">${esc(e.status)}</span></div><div class="ev-meta">${e.image_count?`图 ${e.image_count} 张`:'纯文本'} · ${e.stream?'流式':'非流式'} · ${new Date(e.started_at).toLocaleTimeString()}</div></div>`).join('');$$('[data-ei]').forEach(b=>b.onclick=()=>{sel=b.dataset.ei;show()});const e=ev.find(x=>x.id===sel)||ev[0];$('#evDetail').innerHTML=`<div class="card" style="margin-top:12px"><div class="card-h"><h3>${esc(e.id)}</h3><p>${e.image_count?`图片 ${e.image_count} 张`:'纯文本'} · ${e.stream?'流式':'非流式'}</p></div><div class="card-b">${e.error?`<div class="ev-error">${esc(e.error)}</div>`:''}<div class="ev-stages">${(e.stages||[]).map(s=>`<div class="stage"><div class="stage-dot ${esc(s.status)}"></div><div class="stage-body"><div class="sn">${esc(s.name)}</div><div class="sd">${esc(s.detail||'-')}</div></div><div class="stage-side">${s.model?`<span class="sm">${esc(s.model)}</span><br>`:''}${s.duration_ms}ms</div></div>`).join('')}</div></div></div>`};show()}
+function renderEv(){if(!ev.length){$('#evList').innerHTML='<div class="empty">尚无请求事件</div>';$('#evDetail').innerHTML='<div class="ev-empty-detail">点击左侧事件查看详情</div>';return}let sel=ev[0].id;const show=()=>{$('#evList').innerHTML=ev.map(e=>`<div class="ev-item ${e.id===sel?'sel':''}" data-ei="${esc(e.id)}"><div class="ev-row"><span class="ev-id">${esc(e.id)}</span><span class="badge-s ${esc(e.status)}">${esc(e.status)}</span></div><div class="ev-meta">${e.image_count?`图 ${e.image_count} 张`:'纯文本'} · ${e.stream?'流式':'非流式'} · ${new Date(e.started_at).toLocaleTimeString()}</div></div>`).join('');$$('[data-ei]').forEach(b=>b.onclick=()=>{sel=b.dataset.ei;show()});const e=ev.find(x=>x.id===sel)||ev[0];$('#evDetail').innerHTML=`<div class="card"><div class="card-h"><h3>${esc(e.id)}</h3><p>${e.image_count?`图片 ${e.image_count} 张`:'纯文本'} · ${e.stream?'流式':'非流式'} · ${new Date(e.started_at).toLocaleTimeString()}</p></div><div class="card-b">${e.error?`<div class="ev-error">${esc(e.error)}</div>`:''}<div class="ev-stages">${(e.stages||[]).map(s=>`<div class="stage"><div class="stage-dot ${esc(s.status)}"></div><div class="stage-body"><div class="sn">${esc(s.name)}</div><div class="sd">${esc(s.detail||'-')}</div></div><div class="stage-side">${s.model?`<span class="sm">${esc(s.model)}</span><br>`:''}${s.duration_ms}ms</div></div>`).join('')}</div></div></div>`};show()}
 
 function init(){$('#ver').textContent=c.version;const en=c.enabled;$('#dot').className='dot '+(en?'on':'off');$('#enb').textContent=en?'已启用':'已停用';renderV();['primary_model','text_fallback_0','text_fallback_1','text_fallback_2','auto_compression_model'].forEach(n=>{const cfg=n==='primary_model'?c.primary_model:n==='auto_compression_model'?c.auto_compression_model:(c.text_fallback_models||[])[['text_fallback_0','text_fallback_1','text_fallback_2'].indexOf(n)];$(`[name="${n}"]`).innerHTML=opts(cfg||'',n!=='primary_model')});Object.entries(c).forEach(([n,v])=>setF(n,v));renderPreview();renderEv()}
 
