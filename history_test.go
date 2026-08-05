@@ -16,7 +16,7 @@ func checkpointTestRuntime(calls *atomic.Int32) runtimeConfig {
 	cfg.PrimaryContextBudgetTokens = 500
 	cfg.AutoCompressionTargetTokens = 50
 	cfg.AutoCompressionKeepRecentTurns = 2
-	cfg.historySummarizer = func(history string, _ runtimeConfig, _ string, _ *comboEvent) (string, error) {
+	cfg.historySummarizer = func(history string, _ runtimeConfig, _ string, _ *bridgeEvent) (string, error) {
 		calls.Add(1)
 		return "checkpoint summary: " + fmt.Sprint(len(history)), nil
 	}
@@ -30,7 +30,7 @@ func TestHistoryCheckpointSurvivesCacheRestart(t *testing.T) {
 	first.cache.close()
 	first.cache = newMemoCache(100, path)
 	raw := longHistoryBody(6, 300)
-	if _, err := prepareFinalTextBody(raw, first, "", first.events.begin("combo", "glm", false)); err != nil {
+	if _, err := prepareFinalTextBody(raw, first, "", first.events.begin("bridge", "glm", false)); err != nil {
 		t.Fatal(err)
 	}
 	first.cache.close()
@@ -39,7 +39,7 @@ func TestHistoryCheckpointSurvivesCacheRestart(t *testing.T) {
 	second.cache.close()
 	second.cache = newMemoCache(100, path)
 	defer second.cache.close()
-	event := second.events.begin("combo", "glm", false)
+	event := second.events.begin("bridge", "glm", false)
 	if _, err := prepareFinalTextBody(raw, second, "", event); err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func TestResponsesInputHistoryReusesCheckpoint(t *testing.T) {
 			}},
 		})
 	}
-	raw, _ := json.Marshal(map[string]any{"model": "glm-5.2-vision-combo", "input": items})
-	if _, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("combo", "glm", false)); err != nil {
+	raw, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "input": items})
+	if _, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("bridge", "glm", false)); err != nil {
 		t.Fatal(err)
 	}
-	got, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("combo", "glm", false))
+	got, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("bridge", "glm", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func longHistoryBody(messages int, chars int) []byte {
 		}
 		items = append(items, map[string]any{"role": role, "content": fmt.Sprintf("%02d:%s", index, strings.Repeat("x", chars))})
 	}
-	raw, _ := json.Marshal(map[string]any{"model": "glm-5.2-vision-combo", "messages": items})
+	raw, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "messages": items})
 	return raw
 }
 
@@ -116,14 +116,14 @@ func TestRepeatedLongHistoryReusesCheckpointWithoutSummarizingAgain(t *testing.T
 	cfg := checkpointTestRuntime(&calls)
 	defer cfg.cache.close()
 	raw := longHistoryBody(6, 300)
-	first, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("combo", "glm", false))
+	first, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("bridge", "glm", false))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 1 || !strings.Contains(string(first), "checkpoint summary") {
 		t.Fatalf("first calls=%d body=%s", calls.Load(), first)
 	}
-	secondEvent := cfg.events.begin("combo", "glm", false)
+	secondEvent := cfg.events.begin("bridge", "glm", false)
 	second, err := prepareFinalTextBody(raw, cfg, "", secondEvent)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestTextContextPrecheckEventIsRecordedBelowCompressionThreshold(t *testing.
 	cfg := checkpointTestRuntime(&calls)
 	defer cfg.cache.close()
 	cfg.AutoCompressionThresholdTokens = 1000
-	event := cfg.events.begin("combo", "glm", false)
+	event := cfg.events.begin("bridge", "glm", false)
 	raw := longHistoryBody(2, 30)
 	if _, err := prepareFinalTextBody(raw, cfg, "", event); err != nil {
 		t.Fatal(err)
@@ -185,9 +185,9 @@ func TestToolTrajectoriesRemainStructurallyIdenticalBelowCompressionThreshold(t 
 		protocol string
 		raw      []byte
 	}{
-		{name: "OpenAI Chat", protocol: "openai", raw: encode(map[string]any{"model": "combo", "messages": chatMessages})},
-		{name: "OpenAI Responses", protocol: "openai-response", raw: encode(map[string]any{"model": "combo", "input": responsesInput})},
-		{name: "Anthropic Messages", protocol: "claude", raw: encode(map[string]any{"model": "combo", "messages": claudeMessages})},
+		{name: "OpenAI Chat", protocol: "openai", raw: encode(map[string]any{"model": "bridge", "messages": chatMessages})},
+		{name: "OpenAI Responses", protocol: "openai-response", raw: encode(map[string]any{"model": "bridge", "input": responsesInput})},
+		{name: "Anthropic Messages", protocol: "claude", raw: encode(map[string]any{"model": "bridge", "messages": claudeMessages})},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -195,7 +195,7 @@ func TestToolTrajectoriesRemainStructurallyIdenticalBelowCompressionThreshold(t 
 			t.Cleanup(cfg.cache.close)
 			cfg.AutoCompressionThresholdTokens = 1_000_000
 			cfg.PrimaryContextBudgetTokens = 1_000_000
-			got, err := prepareTextHostBody(test.raw, test.protocol, cfg, "", cfg.events.begin("combo", "glm", true))
+			got, err := prepareTextHostBody(test.raw, test.protocol, cfg, "", cfg.events.begin("bridge", "glm", true))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -225,9 +225,9 @@ func TestToolTrajectoriesRemainStructurallyIdenticalBelowCompressionThreshold(t 
 func TestFinalTextBodyAppliesOnlyTopLevelOutputLimit(t *testing.T) {
 	cfg := testRuntime()
 	defer cfg.cache.close()
-	event := cfg.events.begin("combo", "glm", false)
+	event := cfg.events.begin("bridge", "glm", false)
 	raw := []byte(`{
-		"model":"glm-5.2-vision-combo",
+		"model":"glm-vision-bridge",
 		"max_tokens":50,
 		"max_output_tokens":64,
 		"max_completion_tokens":75,
@@ -271,8 +271,8 @@ func TestFinalTextBodyAppliesOnlyTopLevelOutputLimit(t *testing.T) {
 func TestFinalTextBodyWithoutTopLevelOutputLimitsRemainsByteIdentical(t *testing.T) {
 	cfg := testRuntime()
 	defer cfg.cache.close()
-	raw := []byte(`{ "model": "glm-5.2-vision-combo", "reasoning_effort": "low", "messages": [{"role":"user","content":"hello"}], "tools":[{"parameters":{"properties":{"max_output_tokens":{"type":"integer"}}}}] }`)
-	got, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("combo", "glm", false))
+	raw := []byte(`{ "model": "glm-vision-bridge", "reasoning_effort": "low", "messages": [{"role":"user","content":"hello"}], "tools":[{"parameters":{"properties":{"max_output_tokens":{"type":"integer"}}}}] }`)
+	got, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("bridge", "glm", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestFinalTextBodyWithoutTopLevelOutputLimitsRemainsByteIdentical(t *testing
 func TestFinalTextOutputLimitRejectsNullTopLevelRequest(t *testing.T) {
 	cfg := testRuntime()
 	defer cfg.cache.close()
-	_, err := prepareTextHostBody([]byte("null"), "openai", cfg, "", cfg.events.begin("combo", "glm", false))
+	_, err := prepareTextHostBody([]byte("null"), "openai", cfg, "", cfg.events.begin("bridge", "glm", false))
 	if err == nil || !strings.Contains(err.Error(), "top-level JSON value must be an object") {
 		t.Fatalf("expected object validation error, got %v", err)
 	}
@@ -298,18 +298,18 @@ func TestProtocolFinalTextBodiesApplyEffectiveOutputLimit(t *testing.T) {
 		wantKey   string
 		wantLimit int
 	}{
-		{name: "OpenAI Chat max_tokens", protocol: "openai", raw: `{"model":"combo","max_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
-		{name: "OpenAI Chat max_completion_tokens", protocol: "openai", raw: `{"model":"combo","max_completion_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
-		{name: "OpenAI Responses", protocol: "openai-response", raw: `{"model":"combo","max_output_tokens":64,"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_output_tokens", wantLimit: 64},
-		{name: "Anthropic Messages", protocol: "claude", raw: `{"model":"combo","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
-		{name: "OpenAI Chat missing limit", protocol: "openai", raw: `{"model":"combo","messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64000},
-		{name: "Anthropic Messages capped", protocol: "claude", raw: `{"model":"combo","max_tokens":100000,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64000},
+		{name: "OpenAI Chat max_tokens", protocol: "openai", raw: `{"model":"bridge","max_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
+		{name: "OpenAI Chat max_completion_tokens", protocol: "openai", raw: `{"model":"bridge","max_completion_tokens":64,"messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
+		{name: "OpenAI Responses", protocol: "openai-response", raw: `{"model":"bridge","max_output_tokens":64,"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_output_tokens", wantLimit: 64},
+		{name: "Anthropic Messages", protocol: "claude", raw: `{"model":"bridge","max_tokens":64,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64},
+		{name: "OpenAI Chat missing limit", protocol: "openai", raw: `{"model":"bridge","messages":[{"role":"user","content":"hello"}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64000},
+		{name: "Anthropic Messages capped", protocol: "claude", raw: `{"model":"bridge","max_tokens":100000,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"metadata":{"trace":"keep-me"}}`, wantKey: "max_tokens", wantLimit: 64000},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := testRuntime()
 			defer cfg.cache.close()
-			got, err := prepareTextHostBody([]byte(test.raw), test.protocol, cfg, "", cfg.events.begin("combo", "glm", true))
+			got, err := prepareTextHostBody([]byte(test.raw), test.protocol, cfg, "", cfg.events.begin("bridge", "glm", true))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -363,14 +363,14 @@ func TestSmallAppendedTurnReusesCheckpointWithoutSummarizing(t *testing.T) {
 	cfg := checkpointTestRuntime(&calls)
 	defer cfg.cache.close()
 	raw := longHistoryBody(6, 300)
-	if _, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("combo", "glm", false)); err != nil {
+	if _, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("bridge", "glm", false)); err != nil {
 		t.Fatal(err)
 	}
 	appended := appendHistoryMessages(t, raw,
 		map[string]any{"role": "user", "content": "small follow-up"},
 		map[string]any{"role": "assistant", "content": "small answer"},
 	)
-	got, err := prepareFinalTextBody(appended, cfg, "", cfg.events.begin("combo", "glm", false))
+	got, err := prepareFinalTextBody(appended, cfg, "", cfg.events.begin("bridge", "glm", false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestCheckpointUpdatesOnceAfterDeltaExceedsBudget(t *testing.T) {
 	cfg := checkpointTestRuntime(&calls)
 	defer cfg.cache.close()
 	raw := longHistoryBody(6, 300)
-	if _, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("combo", "glm", false)); err != nil {
+	if _, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("bridge", "glm", false)); err != nil {
 		t.Fatal(err)
 	}
 	appended := appendHistoryMessages(t, raw,
@@ -398,7 +398,7 @@ func TestCheckpointUpdatesOnceAfterDeltaExceedsBudget(t *testing.T) {
 		map[string]any{"role": "user", "content": strings.Repeat("c", 300)},
 		map[string]any{"role": "assistant", "content": strings.Repeat("d", 300)},
 	)
-	event := cfg.events.begin("combo", "glm", false)
+	event := cfg.events.begin("bridge", "glm", false)
 	if _, err := prepareFinalTextBody(appended, cfg, "", event); err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestCheckpointUpdatesOnceAfterDeltaExceedsBudget(t *testing.T) {
 		t.Fatalf("summarizer calls=%d, want exactly 2", calls.Load())
 	}
 	assertEventStage(t, cfg.events, event.ID, "更新历史压缩检查点")
-	if _, err := prepareFinalTextBody(appended, cfg, "", cfg.events.begin("combo", "glm", false)); err != nil {
+	if _, err := prepareFinalTextBody(appended, cfg, "", cfg.events.begin("bridge", "glm", false)); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 2 {

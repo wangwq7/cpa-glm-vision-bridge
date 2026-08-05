@@ -36,7 +36,7 @@ func TestRequestMayContainMedia(t *testing.T) {
 func TestPureTextFastPathDoesNotAddProviderFields(t *testing.T) {
 	runtime := testRuntime()
 	defer runtime.cache.close()
-	raw := []byte(`{"model":"glm-5.2-vision-combo","messages":[{"role":"user","content":"hello"}]}`)
+	raw := []byte(`{"model":"glm-vision-bridge","messages":[{"role":"user","content":"hello"}]}`)
 	got, count, err := transformOpenAIRequest(raw, runtime, func(visualAsset, string) (string, error) {
 		t.Fatal("vision should not run")
 		return "", nil

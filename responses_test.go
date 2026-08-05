@@ -77,7 +77,7 @@ func TestNormalizeResponsesStringInputRejectsInvalidOrNonObjectJSON(t *testing.T
 	}
 }
 
-func TestNormalizeResponsesStringInputDuplicateFieldsKeepLegacyBehavior(t *testing.T) {
+func TestNormalizeResponsesStringInputDuplicateFieldsUseDecodedFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		raw         string
@@ -102,9 +102,9 @@ func TestNormalizeResponsesStringInputDuplicateFieldsKeepLegacyBehavior(t *testi
 			if err != nil || changed != test.wantChanged {
 				t.Fatalf("changed=%v err=%v body=%s", changed, err, got)
 			}
-			legacy, legacyChanged, legacyErr := normalizeResponsesStringInputLegacy([]byte(test.raw))
-			if legacyErr != nil || legacyChanged != changed || !bytes.Equal(got, legacy) {
-				t.Fatalf("optimized result differs from legacy:\noptimized=%s\nlegacy=%s", got, legacy)
+			fallback, fallbackChanged, fallbackErr := normalizeResponsesStringInputDecodedFallback([]byte(test.raw))
+			if fallbackErr != nil || fallbackChanged != changed || !bytes.Equal(got, fallback) {
+				t.Fatalf("optimized result differs from fallback:\noptimized=%s\nfallback=%s", got, fallback)
 			}
 			if test.wantText != "" && !strings.Contains(string(got), test.wantText) {
 				t.Fatalf("missing final input text in %s", got)
@@ -113,7 +113,7 @@ func TestNormalizeResponsesStringInputDuplicateFieldsKeepLegacyBehavior(t *testi
 	}
 }
 
-func TestNormalizeResponsesStringInputMatchesLegacyTextSemantics(t *testing.T) {
+func TestNormalizeResponsesStringInputMatchesDecodedFallbackSemantics(t *testing.T) {
 	tests := []string{
 		`{"input":""}`,
 		`{"input":"plain ASCII"}`,
@@ -125,41 +125,41 @@ func TestNormalizeResponsesStringInputMatchesLegacyTextSemantics(t *testing.T) {
 	for _, raw := range tests {
 		t.Run(raw, func(t *testing.T) {
 			got, changed, err := normalizeResponsesStringInput([]byte(raw), "openai-response")
-			legacy, legacyChanged, legacyErr := normalizeResponsesStringInputLegacy([]byte(raw))
-			if err != nil || legacyErr != nil || !changed || !legacyChanged {
-				t.Fatalf("changed=%v/%v err=%v/%v", changed, legacyChanged, err, legacyErr)
+			fallback, fallbackChanged, fallbackErr := normalizeResponsesStringInputDecodedFallback([]byte(raw))
+			if err != nil || fallbackErr != nil || !changed || !fallbackChanged {
+				t.Fatalf("changed=%v/%v err=%v/%v", changed, fallbackChanged, err, fallbackErr)
 			}
 			var gotValue any
-			var legacyValue any
+			var fallbackValue any
 			if err := json.Unmarshal(got, &gotValue); err != nil {
 				t.Fatal(err)
 			}
-			if err := json.Unmarshal(legacy, &legacyValue); err != nil {
+			if err := json.Unmarshal(fallback, &fallbackValue); err != nil {
 				t.Fatal(err)
 			}
-			if !deepEqualJSON(gotValue, legacyValue) {
-				t.Fatalf("semantic mismatch:\noptimized=%s\nlegacy=%s", got, legacy)
+			if !deepEqualJSON(gotValue, fallbackValue) {
+				t.Fatalf("semantic mismatch:\noptimized=%s\nfallback=%s", got, fallback)
 			}
 		})
 	}
 }
 
-func TestNormalizeResponsesStringInputInvalidUTF8UsesLegacySanitization(t *testing.T) {
+func TestNormalizeResponsesStringInputInvalidUTF8UsesDecodedFallbackSanitization(t *testing.T) {
 	raw := []byte(`{"instructions":"before `)
 	raw = append(raw, 0xff)
 	raw = append(raw, []byte(`","input":"question"}`)...)
 	got, changed, err := normalizeResponsesStringInput(raw, "openai-response")
-	legacy, legacyChanged, legacyErr := normalizeResponsesStringInputLegacy(raw)
-	if err != nil || legacyErr != nil || changed != legacyChanged || !bytes.Equal(got, legacy) {
-		t.Fatalf("optimized result differs from legacy:\noptimized=%q\nlegacy=%q\nerr=%v/%v", got, legacy, err, legacyErr)
+	fallback, fallbackChanged, fallbackErr := normalizeResponsesStringInputDecodedFallback(raw)
+	if err != nil || fallbackErr != nil || changed != fallbackChanged || !bytes.Equal(got, fallback) {
+		t.Fatalf("optimized result differs from fallback:\noptimized=%q\nfallback=%q\nerr=%v/%v", got, fallback, err, fallbackErr)
 	}
 }
 
 func TestPreparePrimaryBodyNormalizesResponsesStringInputOnce(t *testing.T) {
 	cfg := testRuntime()
 	defer cfg.cache.close()
-	event := cfg.events.begin(cfg.ComboModel, cfg.PrimaryModel, false)
-	raw := []byte(`{"model":"glm-5.2-vision-combo","instructions":"keep","input":"question","metadata":{"trace":"same"},"stream":false}`)
+	event := cfg.events.begin(cfg.PublicModel, cfg.PrimaryModel, false)
+	raw := []byte(`{"model":"glm-vision-bridge","instructions":"keep","input":"question","metadata":{"trace":"same"},"stream":false}`)
 
 	got, images, err := preparePrimaryBody(raw, "openai-response", cfg, "", event)
 	if err != nil || images != 0 {
@@ -218,7 +218,7 @@ func TestNormalizeResponsesStringInputOtherProtocolsRemainByteIdentical(t *testi
 	}
 }
 
-func FuzzNormalizeResponsesStringInputMatchesLegacy(f *testing.F) {
+func FuzzNormalizeResponsesStringInputMatchesDecodedFallback(f *testing.F) {
 	for _, seed := range [][]byte{
 		[]byte(`{"input":"hello"}`),
 		[]byte(`{"instructions":"rules","input":[{"role":"user","content":"hello"}]}`),
@@ -233,26 +233,26 @@ func FuzzNormalizeResponsesStringInputMatchesLegacy(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		got, changed, err := normalizeResponsesStringInput(raw, "openai-response")
-		legacy, legacyChanged, legacyErr := normalizeResponsesStringInputLegacy(raw)
-		if (err != nil) != (legacyErr != nil) {
-			t.Fatalf("error mismatch: optimized=%v legacy=%v raw=%q", err, legacyErr, raw)
+		fallback, fallbackChanged, fallbackErr := normalizeResponsesStringInputDecodedFallback(raw)
+		if (err != nil) != (fallbackErr != nil) {
+			t.Fatalf("error mismatch: optimized=%v fallback=%v raw=%q", err, fallbackErr, raw)
 		}
 		if err != nil {
 			return
 		}
-		if changed != legacyChanged {
-			t.Fatalf("changed mismatch: optimized=%v legacy=%v raw=%q", changed, legacyChanged, raw)
+		if changed != fallbackChanged {
+			t.Fatalf("changed mismatch: optimized=%v fallback=%v raw=%q", changed, fallbackChanged, raw)
 		}
 		if !changed {
-			if !bytes.Equal(got, legacy) {
-				t.Fatalf("unchanged bytes mismatch:\noptimized=%q\nlegacy=%q", got, legacy)
+			if !bytes.Equal(got, fallback) {
+				t.Fatalf("unchanged bytes mismatch:\noptimized=%q\nfallback=%q", got, fallback)
 			}
 			return
 		}
 		var gotValue any
-		var legacyValue any
-		if json.Unmarshal(got, &gotValue) != nil || json.Unmarshal(legacy, &legacyValue) != nil || !deepEqualJSON(gotValue, legacyValue) {
-			t.Fatalf("changed semantic mismatch:\noptimized=%q\nlegacy=%q", got, legacy)
+		var fallbackValue any
+		if json.Unmarshal(got, &gotValue) != nil || json.Unmarshal(fallback, &fallbackValue) != nil || !deepEqualJSON(gotValue, fallbackValue) {
+			t.Fatalf("changed semantic mismatch:\noptimized=%q\nfallback=%q", got, fallback)
 		}
 	})
 }

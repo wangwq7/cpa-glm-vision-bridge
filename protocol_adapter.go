@@ -81,11 +81,6 @@ func normalizeProtocol(value string) string {
 	}
 }
 
-func isSupportedProtocol(value string) bool {
-	_, ok := protocolAdapters[normalizeProtocol(value)]
-	return ok
-}
-
 func adapterForProtocol(value string) (protocolAdapter, error) {
 	canonical := normalizeProtocol(value)
 	adapter, ok := protocolAdapters[canonical]

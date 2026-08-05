@@ -15,7 +15,7 @@ func safeCompressionTestRuntime(t *testing.T) runtimeConfig {
 	cfg.PrimaryContextBudgetTokens = 100000
 	cfg.AutoCompressionTargetTokens = 50
 	cfg.AutoCompressionKeepRecentTurns = 2
-	cfg.historySummarizer = func(string, runtimeConfig, string, *comboEvent) (string, error) {
+	cfg.historySummarizer = func(string, runtimeConfig, string, *bridgeEvent) (string, error) {
 		return "safe checkpoint summary", nil
 	}
 	return cfg
@@ -124,11 +124,11 @@ func TestHistoryCompressionPreservesToolPairsAcrossProtocols(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cfg := safeCompressionTestRuntime(t)
 			defer cfg.cache.close()
-			raw, err := json.Marshal(map[string]any{"model": "combo", test.field: test.items})
+			raw, err := json.Marshal(map[string]any{"model": "bridge", test.field: test.items})
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("combo", "glm", false))
+			got, err := prepareFinalTextBody(raw, cfg, "", cfg.events.begin("bridge", "glm", false))
 			if err != nil {
 				t.Fatal(err)
 			}

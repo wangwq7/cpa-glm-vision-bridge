@@ -37,8 +37,8 @@ func TestDefaultConfigUsesBenchmarkedProductionProfile(t *testing.T) {
 			t.Fatalf("visual model %d = %q, want %q", index, cfg.VisionModels[index].Model, want)
 		}
 	}
-	if cfg.VisionTimeoutSeconds != 20 || cfg.VisionCancelGraceSeconds != 15 {
-		t.Fatalf("unexpected visual timing: timeout=%d grace=%d", cfg.VisionTimeoutSeconds, cfg.VisionCancelGraceSeconds)
+	if cfg.VisionModels[0].TimeoutSeconds != 20 || cfg.VisionCancelGraceSeconds != 15 {
+		t.Fatalf("unexpected visual timing: timeout=%d grace=%d", cfg.VisionModels[0].TimeoutSeconds, cfg.VisionCancelGraceSeconds)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestVisionRequestUsesHighImageDetail(t *testing.T) {
 }
 
 func TestTransformOpenAIRequestReplacesImageAndPreservesText(t *testing.T) {
-	raw := []byte(`{"model":"glm-5.2-vision-combo","messages":[{"role":"user","content":[{"type":"text","text":"what is this?"},{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]}]}`)
+	raw := []byte(`{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"what is this?"},{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]}]}`)
 	got, count, err := transformOpenAIRequest(raw, testRuntime(), func(a visualAsset, context string) (string, error) {
 		if a.URL != "https://example.test/a.png" {
 			t.Fatal(a.URL)
@@ -182,16 +182,16 @@ func TestVisionCancelGraceDefaultsAndCaps(t *testing.T) {
 	}
 }
 
-func TestLegacyVisionOutputTokenFieldsAreIgnored(t *testing.T) {
+func TestVisionModelConfigurationPreservesIndependentBudgets(t *testing.T) {
 	raw := []byte(`
 enabled: true
-combo_model: combo
+public_model: bridge
 primary_model: text
-vision_primary_model: vision
-vision_output_tokens: 4000
 vision_models:
-  - model: ignored-because-legacy-fields-win
-    max_output_tokens: 2000
+  - model: vision
+    context_limit: 128000
+    context_budget: 96000
+    timeout_seconds: 37
 `)
 	var cfg pluginConfig
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
@@ -201,8 +201,12 @@ vision_models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(normalized.VisionModels) != 1 || normalized.VisionModels[0].Model != "vision" {
+	if len(normalized.VisionModels) != 1 {
 		t.Fatalf("vision models=%#v", normalized.VisionModels)
+	}
+	model := normalized.VisionModels[0]
+	if model.Model != "vision" || model.ContextLimit != 128000 || model.ContextBudget != 96000 || model.TimeoutSeconds != 37 {
+		t.Fatalf("vision model=%#v", model)
 	}
 }
 
@@ -360,14 +364,12 @@ func TestAllCachedHistoryImagesAreRewritten(t *testing.T) {
 	}
 }
 
-func TestNamedVisionChainOverridesAdvancedList(t *testing.T) {
+func TestVisionModelsKeepOrderAndIndependentSettings(t *testing.T) {
 	cfg := defaultPluginConfig()
-	cfg.VisionPrimaryModel = "vision-a"
-	cfg.VisionBackupModel1 = "vision-b"
-	cfg.VisionBackupModel2 = ""
-	cfg.VisionBackupModel3 = ""
-	cfg.VisionContextLimit = 256000
-	cfg.VisionModels = []visionModel{{Model: "ignored-advanced", ContextLimit: 1}}
+	cfg.VisionModels = []visionModel{
+		{Model: "vision-a", ContextLimit: 256000, ContextBudget: 120000, TimeoutSeconds: 17},
+		{Model: "vision-b", ContextLimit: 128000, ContextBudget: 64000, TimeoutSeconds: 29},
+	}
 	got, err := normalizeConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -375,16 +377,16 @@ func TestNamedVisionChainOverridesAdvancedList(t *testing.T) {
 	if len(got.VisionModels) != 2 || got.VisionModels[0].Model != "vision-a" || got.VisionModels[1].Model != "vision-b" {
 		t.Fatalf("unexpected chain: %#v", got.VisionModels)
 	}
-	if got.VisionModels[0].ContextLimit != 256000 {
-		t.Fatalf("context limit = %d", got.VisionModels[0].ContextLimit)
+	if got.VisionModels[0].ContextLimit != 256000 || got.VisionModels[1].TimeoutSeconds != 29 {
+		t.Fatalf("independent settings were not preserved: %#v", got.VisionModels)
 	}
 }
 
-func TestVisionChainCannotPointBackToCombo(t *testing.T) {
+func TestVisionChainCannotPointBackToBridge(t *testing.T) {
 	cfg := defaultPluginConfig()
-	cfg.VisionPrimaryModel = cfg.ComboModel
+	cfg.VisionModels[0].Model = cfg.PublicModel
 	_, err := normalizeConfig(cfg)
-	if err == nil || !strings.Contains(err.Error(), "cannot point back to this combo") {
+	if err == nil || !strings.Contains(err.Error(), "cannot point back to the bridge") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -393,8 +395,7 @@ func TestNormalizeRejectsTextVisionModelOverlap(t *testing.T) {
 	cfg := defaultPluginConfig()
 	cfg.PrimaryModel = "glm-5.2"
 	cfg.TextFallbackModels = []string{"gpt-5.5", "gpt-5.6-terra"}
-	cfg.VisionPrimaryModel = "gpt-5.4-mini"
-	cfg.VisionBackupModel1 = "gpt-5.6-terra"
+	cfg.VisionModels = []visionModel{{Model: "gpt-5.4-mini"}, {Model: "gpt-5.6-terra"}}
 	if _, err := normalizeConfig(cfg); err == nil || !strings.Contains(err.Error(), "both text and visual") {
 		t.Fatalf("expected text/vision overlap error, got %v", err)
 	}
@@ -402,10 +403,10 @@ func TestNormalizeRejectsTextVisionModelOverlap(t *testing.T) {
 
 func TestEventStoreKeepsBoundedSanitizedHistory(t *testing.T) {
 	store := newEventStore(1)
-	first := store.begin("combo", "glm", false)
+	first := store.begin("bridge", "glm", false)
 	store.stage(first, "视觉识别完成", "完成", "vision", strings.Repeat("x", 700), time.Now())
 	store.finish(first, nil)
-	_ = store.begin("combo", "glm", true)
+	_ = store.begin("bridge", "glm", true)
 	events := store.snapshot()
 	if len(events) != 1 || !events[0].Stream {
 		t.Fatalf("unexpected events: %#v", events)

@@ -90,7 +90,7 @@ func TestProtocolAdaptersEmitNativeVisualMemoryBlocks(t *testing.T) {
 		{
 			name:        "openai chat",
 			protocol:    protocolOpenAIChat,
-			raw:         `{"model":"combo","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]}],"metadata":{"keep":"chat"}}`,
+			raw:         `{"model":"bridge","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]}],"metadata":{"keep":"chat"}}`,
 			field:       "messages",
 			item:        0,
 			content:     1,
@@ -100,7 +100,7 @@ func TestProtocolAdaptersEmitNativeVisualMemoryBlocks(t *testing.T) {
 		{
 			name:        "responses",
 			protocol:    protocolResponses,
-			raw:         `{"model":"combo","input":[{"role":"user","content":[{"type":"input_text","text":"inspect"},{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}],"metadata":{"keep":"responses"}}`,
+			raw:         `{"model":"bridge","input":[{"role":"user","content":[{"type":"input_text","text":"inspect"},{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}],"metadata":{"keep":"responses"}}`,
 			field:       "input",
 			item:        0,
 			content:     1,
@@ -110,7 +110,7 @@ func TestProtocolAdaptersEmitNativeVisualMemoryBlocks(t *testing.T) {
 		{
 			name:        "anthropic",
 			protocol:    protocolAnthropic,
-			raw:         `{"model":"combo","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}}]}],"metadata":{"keep":"claude"}}`,
+			raw:         `{"model":"bridge","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}}]}],"metadata":{"keep":"claude"}}`,
 			field:       "messages",
 			item:        0,
 			content:     1,
@@ -200,7 +200,7 @@ func TestRouteModelLeavesUnsupportedProtocolsUnhandled(t *testing.T) {
 	}
 	raw, err := json.Marshal(rpcRouteRequest{ModelRouteRequest: pluginapi.ModelRouteRequest{
 		SourceFormat:   "gemini",
-		RequestedModel: defaultPluginConfig().ComboModel,
+		RequestedModel: defaultPluginConfig().PublicModel,
 	}})
 	if err != nil {
 		t.Fatal(err)

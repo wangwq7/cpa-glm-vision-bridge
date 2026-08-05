@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GLM Vision Bridge</title>
+<style>
+:root{--bg:#f8f9fb;--card:#fff;--ink:#1a2332;--sub:#6b7785;--line:#e4e8ee;--soft:#f0f3f7;--blue:#3b6fd4;--blue-bg:#eef3fc;--green:#1a8a6b;--green-bg:#e8f6f0;--amber:#b8730c;--amber-bg:#fdf6e8;--red:#c54b4b;--red-bg:#fdeaea;--radius:10px;--shadow:0 1px 3px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.04)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:920px;margin:0 auto;padding:32px 20px 100px}
+
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
+.header h1{font-size:22px;font-weight:700;letter-spacing:-.02em}
+.header .sub{font-size:13px;color:var(--sub);margin-top:2px}
+.header .ver{font:11px ui-monospace,monospace;color:var(--sub);background:var(--soft);padding:2px 8px;border-radius:20px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.dot.on{background:var(--green)}.dot.off{background:var(--red)}
+
+/* Tabs */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:24px}
+.tab{padding:10px 18px;border:0;border-bottom:2px solid transparent;background:0;color:var(--sub);font-size:14px;font-weight:500;cursor:pointer;transition:.15s}
+.tab:hover{color:var(--ink)}
+.tab.active{border-color:var(--blue);color:var(--blue);font-weight:600}
+.view{display:none}.view.active{display:block}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.stat .v{font:600 15px ui-monospace,monospace;word-break:break-all}
+.stat .l{font-size:11px;color:var(--sub);margin-top:3px}
+
+/* Cards */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px}
+.card-h{padding:16px 20px;border-bottom:1px solid var(--line)}
+.card-h h3{font-size:15px;font-weight:600}
+.card-h p{font-size:12px;color:var(--sub);margin-top:2px}
+.card-b{padding:20px}
+
+/* Form */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid .span2{grid-column:span 2}
+.fld{display:flex;flex-direction:column;gap:5px}
+.fld label{font-size:12px;font-weight:600;color:var(--ink)}
+.fld .hint{font-size:11px;color:var(--sub);line-height:1.4}
+input,select,textarea{width:100%;height:38px;border:1px solid var(--line);border-radius:6px;padding:0 10px;background:#fff;color:var(--ink);font:inherit;outline:none;transition:.15s}
+textarea{height:auto;min-height:80px;padding:8px 10px;resize:vertical;line-height:1.5}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,111,212,.1)}
+input[type=checkbox]{width:auto;height:auto;accent-color:var(--blue)}
+.switch{display:flex;align-items:center;gap:10px;padding:10px 0}
+.switch label{font-size:13px;font-weight:600;cursor:pointer}
+
+/* Vision table */
+.vtbl{width:100%;border-collapse:separate;border-spacing:0}
+.vtbl th{text-align:left;font-size:11px;font-weight:600;color:var(--sub);padding:0 6px 8px}
+.vtbl td{padding:4px 6px}
+.vtbl select,input.vinp{height:34px}
+.vtbl .ck{text-align:center}
+.vtbl .ck input{width:16px;height:16px}
+
+/* Budget bar */
+.budget{padding:12px 16px;border-radius:8px;font-size:12px;line-height:1.6;display:flex;align-items:center;gap:8px}
+.budget.ok{background:var(--green-bg);color:var(--green)}
+.budget.bad{background:var(--red-bg);color:var(--red)}
+.budget svg{flex-shrink:0}
+
+/* Route diagram */
+.flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+.flow-node{flex:1;min-width:120px;padding:14px;border:1px solid var(--line);border-radius:8px;background:#fff;text-align:center}
+.flow-node.active{border-color:var(--blue);background:var(--blue-bg)}
+.flow-node.final{border-color:var(--green);background:var(--green-bg)}
+.flow-node .n{font-size:11px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.flow-node .m{font:600 12px ui-monospace,monospace;margin-top:4px;word-break:break-all}
+.flow-arrow{display:flex;align-items:center;color:var(--line);font-size:18px;padding:0 4px}
+.flow-chain{display:grid;gap:6px}
+.flow-chain .vc{border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:11px;display:flex;justify-content:space-between;align-items:center}
+.flow-chain .vc .vn{font-weight:600}.flow-chain .vc .vs{color:var(--sub)}
+
+/* Events */
+.ev-list{display:grid;gap:8px}
+.ev-item{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer;transition:.12s}
+.ev-item:hover{border-color:var(--blue)}
+.ev-item.sel{border-color:var(--blue);background:var(--blue-bg)}
+.ev-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ev-id{font:600 12px ui-monospace,monospace}
+.ev-meta{font-size:11px;color:var(--sub);margin-top:3px}
+.badge-s{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap}
+.badge-s.完成{background:var(--green-bg);color:var(--green)}
+.badge-s.失败{background:var(--red-bg);color:var(--red)}
+.badge-s.进行中{background:var(--amber-bg);color:var(--amber)}
+.ev-stages{margin-top:16px}
+.stage{display:grid;grid-template-columns:auto 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--soft)}
+.stage:last-child{border:0}
+.stage-dot{width:8px;height:8px;border-radius:50%;margin-top:5px}
+.stage-dot.完成{background:var(--green)}.stage-dot.失败{background:var(--red)}.stage-dot.进行中{background:var(--amber)}.stage-dot.跳过{background:var(--line)}
+.stage-body .sn{font-size:13px;font-weight:600}
+.stage-body .sd{font-size:12px;color:var(--sub);margin-top:2px;white-space:pre-wrap;word-break:break-word;line-height:1.5}
+.stage-side{text-align:right;font-size:11px;color:var(--sub);white-space:nowrap}
+.stage-side .sm{font:11px ui-monospace,monospace;background:var(--soft);padding:1px 5px;border-radius:4px;display:inline-block;margin-bottom:2px}
+.ev-error{background:var(--red-bg);color:var(--red);padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:12px}
+.empty{text-align:center;padding:40px 20px;color:var(--sub);font-size:13px}
+
+/* Save bar */
+.savebar{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -2px 12px rgba(0,0,0,.06);z-index:50}
+.savebar-inner{max-width:920px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:12px}
+.savebar-inner .msg{flex:1;font-size:12px;color:var(--sub);min-height:18px}
+.savebar-inner .msg.err{color:var(--red)}.savebar-inner .msg.ok{color:var(--green)}
+.btn{height:36px;padding:0 16px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;transition:.12s}
+.btn:hover{background:var(--soft)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+.btn.primary:hover{background:#2f5cb8}
+input.key{width:160px;height:36px;font-size:12px}
+
+@media(max-width:680px){
+.stats{grid-template-columns:1fr 1fr}
+.grid{grid-template-columns:1fr}
+.grid .span2{grid-column:span 1}
+.flow{flex-direction:column}.flow-arrow{transform:rotate(90deg);justify-content:center;padding:4px 0}
+.vtbl{font-size:12px}
+.savebar-inner{flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1>GLM Vision Bridge</h1>
+      <div class="sub"><span class="dot on" id="dot"></span><span id="enb">已启用</span> · OpenAI Chat / Responses / Claude Messages</div>
+    </div>
+    <div class="ver">v<span id="ver">-</span></div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="v" id="s1">-</div><div class="l">对外模型</div></div>
+    <div class="stat"><div class="v" id="s2">-</div><div class="l">主文本模型</div></div>
+    <div class="stat"><div class="v" id="s3">-</div><div class="l">首选视觉模型</div></div>
+    <div class="stat"><div class="v" id="s4">0</div><div class="l">事件数</div></div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-v="overview">概览</button>
+    <button class="tab" data-v="settings">配置</button>
+    <button class="tab" data-v="events">事件</button>
+  </div>
+
+  <!-- Overview -->
+  <div id="overview" class="view active">
+    <div class="card">
+      <div class="card-h"><h3>路由流程</h3><p>视觉模型只负责识别，最终回答始终由文本模型链生成。</p></div>
+      <div class="card-b">
+        <div class="flow">
+          <div class="flow-node active"><div class="n">入口</div><div class="m" id="f1">-</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-node"><div class="n">附件处理</div><div class="m" id="f2">-</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-node"><div class="n">视觉链</div><div class="m" id="f3">-</div></div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-node final"><div class="n">最终回答</div><div class="m" id="f4">-</div></div>
+        </div>
+        <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div style="font-size:12px;color:var(--sub);background:var(--soft);padding:10px 12px;border-radius:8px"><b style="color:var(--ink)">纯文本</b><br>跳过视觉链</div>
+          <div style="font-size:12px;color:var(--sub);background:var(--soft);padding:10px 12px;border-radius:8px"><b style="color:var(--ink)">图片</b><br>缓存命中不重复识别</div>
+          <div style="font-size:12px;color:var(--sub);background:var(--soft);padding:10px 12px;border-radius:8px"><b style="color:var(--ink)">失败</b><br>顺序回退，不并发</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div id="settings" class="view">
+    <form id="form">
+      <div class="card">
+        <div class="card-h"><h3>入口与文本模型</h3><p>对外只暴露一个模型名；文本链与视觉链不能重复。</p></div>
+        <div class="card-b">
+          <div class="grid">
+            <div class="fld span2"><label>对外模型名</label><input name="public_model" required><div class="hint">客户端请求使用的唯一模型名。</div></div>
+            <div class="fld"><label>主文本模型</label><select name="primary_model" data-model required></select><div class="hint">最终回答优先使用。</div></div>
+            <div class="fld"><label>文本备用 1</label><select name="text_fallback_0" data-model></select></div>
+            <div class="fld"><label>文本备用 2</label><select name="text_fallback_1" data-model></select></div>
+            <div class="fld"><label>文本备用 3</label><select name="text_fallback_2" data-model></select></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>视觉模型链</h3><p>按顺序尝试，最多四个；识图固定 low 思考，不设输出上限。</p></div>
+        <div class="card-b">
+          <table class="vtbl">
+            <thead><tr><th>模型</th><th>上下文</th><th>预算</th><th>超时(s)</th><th class="ck">启用</th></tr></thead>
+            <tbody id="vrows"></tbody>
+          </table>
+          <div class="grid" style="margin-top:16px">
+            <div class="fld"><label>附近文字预算</label><input name="vision_input_token_budget" type="number" min="1"></div>
+            <div class="fld"><label>单图预留 tokens</label><input name="vision_image_token_reserve" type="number" min="1"></div>
+            <div class="fld"><label>取消确认等待(s)</label><input name="vision_cancel_grace_seconds" type="number" min="1" max="120"><div class="hint">正常请求不增加延迟。</div></div>
+            <div class="fld"><label>全部失败时</label><select name="on_vision_failure"><option value="error">返回错误</option><option value="text_only">继续文本回答</option></select></div>
+            <div class="fld span2"><label>视觉提示词</label><textarea name="vision_prompt"></textarea><div class="hint">图片文字按不可信数据处理。</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>上下文预算</h3><p>输入预算 + 输出上限 ≤ 总上下文。</p></div>
+        <div class="card-b">
+          <div class="budget ok" id="budget"></div>
+          <div class="grid" style="margin-top:16px">
+            <div class="fld"><label>总上下文</label><input name="primary_context_tokens" type="number" min="1000"></div>
+            <div class="fld"><label>输入工作预算</label><input name="primary_context_budget_tokens" type="number" min="1000"></div>
+            <div class="fld"><label>输出上限</label><input name="primary_output_token_limit" type="number" min="1"><div class="hint">保留客户端较小值。</div></div>
+            <div class="fld"><label>历史图片策略</label><select name="history_attachment_mode"><option value="onDemand">按需恢复</option><option value="retain">全部保留</option></select></div>
+            <div class="fld"><label>归档标记上限</label><input name="history_attachment_compact_chars" type="number" min="120" max="4000"></div>
+            <div class="fld"><label>最多恢复旧图</label><input name="history_attachment_restore_max_attachments" type="number" min="1" max="16"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>历史压缩</h3><p>在完整语义轮次与工具事务边界建立摘要检查点。</p></div>
+        <div class="card-b">
+          <div class="switch"><input name="auto_compression_enabled" type="checkbox" id="ac"><label for="ac">启用自动压缩</label></div>
+          <div class="grid" style="margin-top:12px">
+            <div class="fld"><label>压缩阈值</label><input name="auto_compression_threshold_tokens" type="number" min="1"></div>
+            <div class="fld"><label>摘要目标</label><input name="auto_compression_target_tokens" type="number" min="1"></div>
+            <div class="fld"><label>保留最近轮次</label><input name="auto_compression_keep_recent_turns" type="number" min="1" max="64"></div>
+            <div class="fld"><label>摘要模型</label><select name="auto_compression_model" data-model></select><div class="hint">留空用主模型。</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h3>缓存与限制</h3><p>持久缓存只保存视觉文本与摘要，不保存原图。</p></div>
+        <div class="card-b">
+          <div class="grid">
+            <div class="fld"><label>缓存时长(s)</label><input name="cache_ttl_seconds" type="number" min="1"></div>
+            <div class="fld"><label>最大条数</label><input name="cache_max_entries" type="number" min="1"></div>
+            <div class="fld span2"><label>缓存路径</label><input name="cache_path"></div>
+            <div class="fld"><label>单轮最大图片</label><input name="max_images_per_request" type="number" min="1"></div>
+            <div class="fld"><label>并发识图</label><input name="max_concurrent_extractions" type="number" min="1" max="8"></div>
+            <div class="fld"><label>单图上限(字节)</label><input name="max_image_data_bytes" type="number" min="1"></div>
+            <div class="fld"><label>事件保留条数</label><input name="event_log_max_entries" type="number" min="1"></div>
+            <div class="switch span2"><input name="allow_remote_image_urls" type="checkbox" id="rm"><label for="rm">允许远程图片 URL</label></div>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Events -->
+  <div id="events" class="view">
+    <div id="evList" class="ev-list"></div>
+    <div id="evDetail"></div>
+  </div>
+</div>
+
+<div class="savebar">
+  <div class="savebar-inner">
+    <input class="key" id="mkey" type="password" placeholder="管理密钥" autocomplete="off">
+    <button class="btn primary" id="save">保存</button>
+    <button class="btn" id="reload">刷新</button>
+    <div class="msg" id="msg"></div>
+  </div>
+</div>
+
+<script>
+const D=__GLM_VISION_BRIDGE_DATA__,c=D.config,ml=[...new Set(D.models||[])].sort(),ev=D.events||[];
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+const nv=n=>Number($(`[name="${n}"]`).value),vv=n=>$(`[name="${n}"]`).value,ck=n=>$(`[name="${n}"]`).checked;
+function opts(sel,allow=true){let a=allow?'<option value="">—</option>':'';if(sel&&!ml.includes(sel))a+=`<option selected value="${esc(sel)}">${esc(sel)}</option>`;return a+ml.map(m=>`<option value="${esc(m)}" ${m===sel?'selected':''}>${esc(m)}</option>`).join('')}
+function setF(n,v){const f=$(`[name="${n}"]`);if(!f)return;if(f.type==='checkbox')f.checked=!!v;else f.value=v??''}
+function vFromForm(){return Array.from({length:4},(_,i)=>({model:vv(`vision_model_${i}`).trim(),context_limit:nv(`vision_context_limit_${i}`),context_budget:nv(`vision_context_budget_${i}`),timeout_seconds:nv(`vision_timeout_seconds_${i}`),enabled:ck(`vision_enabled_${i}`)})).filter(m=>m.model)}
+
+function renderV(){const cf=c.vision_models||[];$('#vrows').innerHTML=Array.from({length:4},(_,i)=>{const m=cf[i]||{};return`<tr><td><select class="vinp" name="vision_model_${i}">${opts(m.model||'')}</select></td><td><input class="vinp" name="vision_context_limit_${i}" type="number" min="1025" value="${m.context_limit||262144}"></td><td><input class="vinp" name="vision_context_budget_${i}" type="number" min="1" value="${m.context_budget||180000}"></td><td><input class="vinp" name="vision_timeout_seconds_${i}"" type="number" min="1" value="${m.timeout_seconds||20}"></td><td class="ck"><input name="vision_enabled_${i}" type="checkbox" ${m.enabled!==false?'checked':''}></td></tr>`}).join('')}
+
+function renderPreview(){const pm=vv('public_model').trim()||'—',pr=vv('primary_model')||'—',fb=['text_fallback_0','text_fallback_1','text_fallback_2'].map(vv).filter(Boolean),vs=vFromForm();$('#s1').textContent=pm;$('#s2').textContent=pr;$('#s3').textContent=vs[0]?.model||'—';$('#f1').textContent=pm;$('#f2').textContent=vv('history_attachment_mode')==='retain'?'全部保留':'按需恢复';$('#f3').textContent=vs.map(m=>m.model).join(' → ')||'—';$('#f4').textContent=[pr,...fb].join(' → ')||'—';const ctx=nv('primary_context_tokens'),inp=nv('primary_context_budget_tokens'),out=nv('primary_output_token_limit'),th=nv('auto_compression_threshold_tokens'),tg=nv('auto_compression_target_tokens');const ok=ctx>inp&&inp+out<=ctx&&inp>th&&th>tg;const b=$('#budget');b.className='budget '+(ok?'ok':'bad');b.innerHTML=ok?`✓ 输入 ${inp.toLocaleString()} + 输出 ${out.toLocaleString()} = ${(inp+out).toLocaleString()}，余量 ${(ctx-inp-out).toLocaleString()}`:`✗ 需满足：总上下文 > 输入预算 > 压缩阈值 > 摘要目标，且输入+输出 ≤ 总上下文`}
+
+function renderEv(){if(!ev.length){$('#evList').innerHTML='<div class="empty">尚无请求事件</div>';$('#evDetail').innerHTML='';return}let sel=ev[0].id;const show=()=>{$('#evList').innerHTML=ev.map(e=>`<div class="ev-item ${e.id===sel?'sel':''}" data-ei="${esc(e.id)}"><div class="ev-row"><span class="ev-id">${esc(e.id)}</span><span class="badge-s ${esc(e.status)}">${esc(e.status)}</span></div><div class="ev-meta">${e.image_count?`图 ${e.image_count} 张`:'纯文本'} · ${e.stream?'流式':'非流式'} · ${new Date(e.started_at).toLocaleTimeString()}</div></div>`).join('');$$('[data-ei]').forEach(b=>b.onclick=()=>{sel=b.dataset.ei;show()});const e=ev.find(x=>x.id===sel)||ev[0];$('#evDetail').innerHTML=`<div class="card" style="margin-top:12px"><div class="card-h"><h3>${esc(e.id)}</h3><p>${e.image_count?`图片 ${e.image_count} 张`:'纯文本'} · ${e.stream?'流式':'非流式'}</p></div><div class="card-b">${e.error?`<div class="ev-error">${esc(e.error)}</div>`:''}<div class="ev-stages">${(e.stages||[]).map(s=>`<div class="stage"><div class="stage-dot ${esc(s.status)}"></div><div class="stage-body"><div class="sn">${esc(s.name)}</div><div class="sd">${esc(s.detail||'-')}</div></div><div class="stage-side">${s.model?`<span class="sm">${esc(s.model)}</span><br>`:''}${s.duration_ms}ms</div></div>`).join('')}</div></div></div>`};show()}
+
+function init(){$('#ver').textContent=c.version;const en=c.enabled;$('#dot').className='dot '+(en?'on':'off');$('#enb').textContent=en?'已启用':'已停用';renderV();['primary_model','text_fallback_0','text_fallback_1','text_fallback_2','auto_compression_model'].forEach(n=>{const cfg=n==='primary_model'?c.primary_model:n==='auto_compression_model'?c.auto_compression_model:(c.text_fallback_models||[])[['text_fallback_0','text_fallback_1','text_fallback_2'].indexOf(n)];$(`[name="${n}"]`).innerHTML=opts(cfg||'',n!=='primary_model')});Object.entries(c).forEach(([n,v])=>setF(n,v));renderPreview();renderEv()}
+
+$$('.tab').forEach(t=>t.onclick=()=>{$$('.tab,.view').forEach(x=>x.classList.remove('active'));t.classList.add('active');$('#'+t.dataset.v).classList.add('active')});
+$('#reload').onclick=()=>location.reload();
+$('#form').addEventListener('input',renderPreview);
+$('#save').onclick=async()=>{const m=$('#msg');const pm=vv('public_model').trim(),pr=vv('primary_model').trim(),fb=['text_fallback_0','text_fallback_1','text_fallback_2'].map(vv).map(x=>x.trim()).filter(Boolean),vs=vFromForm(),cm=vv('auto_compression_model').trim();const at=[pr,...fb,...(cm?[cm]:[])],cf=[...new Set(vs.map(x=>x.model).filter(x=>at.includes(x)))];const ctx=nv('primary_context_tokens'),inp=nv('primary_context_budget_tokens'),out=nv('primary_output_token_limit'),th=nv('auto_compression_threshold_tokens'),tg=nv('auto_compression_target_tokens');m.className='msg';if(!pm||!pr)return m.textContent='请填写对外模型和主文本模型',m.classList.add('err');if([...at,...vs.map(x=>x.model)].includes(pm))return m.textContent='对外模型不能指向上游',m.classList.add('err');if(!vs.length||!vs.some(x=>x.enabled))return m.textContent='至少启用一个视觉模型',m.classList.add('err');if(cf.length)return m.textContent=`模型重复：${cf.join('、')}`,m.classList.add('err');if(vs.some(x=>x.context_budget>=x.context_limit))return m.textContent='视觉预算必须低于上下文',m.classList.add('err');if(!(ctx>inp&&inp+out<=ctx&&inp>th&&th>tg))return m.textContent='预算关系无效',m.classList.add('err');const body={enabled:true,public_model:pm,primary_model:pr,primary_context_tokens:ctx,primary_context_budget_tokens:inp,primary_output_token_limit:out,text_fallback_models:fb,vision_models:vs,vision_prompt:vv('vision_prompt'),vision_input_token_budget:nv('vision_input_token_budget'),vision_image_token_reserve:nv('vision_image_token_reserve'),vision_cancel_grace_seconds:nv('vision_cancel_grace_seconds'),cache_ttl_seconds:nv('cache_ttl_seconds'),cache_max_entries:nv('cache_max_entries'),cache_path:vv('cache_path'),event_log_max_entries:nv('event_log_max_entries'),on_vision_failure:vv('on_vision_failure'),max_images_per_request:nv('max_images_per_request'),max_concurrent_extractions:nv('max_concurrent_extractions'),max_image_data_bytes:nv('max_image_data_bytes'),allow_remote_image_urls:ck('allow_remote_image_urls'),history_attachment_mode:vv('history_attachment_mode'),history_attachment_compact_chars:nv('history_attachment_compact_chars'),history_attachment_restore_max_attachments:nv('history_attachment_restore_max_attachments'),auto_compression_enabled:ck('auto_compression_enabled'),auto_compression_threshold_tokens:th,auto_compression_target_tokens:tg,auto_compression_keep_recent_turns:nv('auto_compression_keep_recent_turns'),auto_compression_model:cm};const h={'Content-Type':'application/json'};const k=$('#mkey').value.trim();if(k)h.Authorization='Bearer '+k;m.textContent='保存中…';try{const r=await fetch('/v0/management/plugins/glm-vision-bridge/config',{method:'PATCH',headers:h,body:JSON.stringify(body)});if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);m.textContent='保存成功，重新加载中…';m.classList.add('ok');setTimeout(()=>location.reload(),800)}catch(e){m.textContent='失败：'+e.message;m.classList.add('err')}};
+init();
+</script>
+</body>
+</html>

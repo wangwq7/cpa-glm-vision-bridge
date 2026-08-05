@@ -1,0 +1,61 @@
+plugins:
+  enabled: true
+  configs:
+    glm-vision-bridge:
+      enabled: true
+      priority: 100
+
+      public_model: glm-vision-bridge
+
+      primary_model: glm-5.2
+      primary_context_tokens: 1000000
+      primary_context_budget_tokens: 900000
+      primary_output_token_limit: 64000
+      text_fallback_models:
+        - gpt-5.5
+        - gpt-5.6-sol
+
+      vision_models:
+        - model: gemini-3.1-flash-lite
+          context_limit: 262144
+          context_budget: 180000
+          timeout_seconds: 20
+          enabled: true
+        - model: gpt-5.6-terra
+          context_limit: 262144
+          context_budget: 180000
+          timeout_seconds: 20
+          enabled: true
+        - model: grok-4.5
+          context_limit: 262144
+          context_budget: 180000
+          timeout_seconds: 20
+          enabled: true
+        - model: claude-sonnet-4-6
+          context_limit: 262144
+          context_budget: 180000
+          timeout_seconds: 20
+          enabled: true
+
+      vision_input_token_budget: 1200
+      vision_image_token_reserve: 4096
+      vision_cancel_grace_seconds: 15
+      on_vision_failure: error
+
+      history_attachment_mode: onDemand
+      history_attachment_compact_chars: 600
+      history_attachment_restore_max_attachments: 2
+      auto_compression_enabled: true
+      auto_compression_threshold_tokens: 820000
+      auto_compression_target_tokens: 12000
+      auto_compression_keep_recent_turns: 8
+      auto_compression_model: ""
+
+      cache_ttl_seconds: 259200
+      cache_max_entries: 2000
+      cache_path: /CLIProxyAPI/plugins/data/glm-vision-bridge-cache.json
+      event_log_max_entries: 100
+      max_images_per_request: 8
+      max_concurrent_extractions: 2
+      max_image_data_bytes: 12582912
+      allow_remote_image_urls: true

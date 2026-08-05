@@ -1,4 +1,4 @@
-module github.com/a777/glm-vision-combo
+module github.com/wangwq7/cpa-glm-vision-bridge
 
 go 1.26.0
 

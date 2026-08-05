@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// comboEvent intentionally stores routing metadata rather than the raw user
+// bridgeEvent intentionally stores routing metadata rather than the raw user
 // request or image URL. It is a local, in-memory diagnostic trail.
-type comboEvent struct {
+type bridgeEvent struct {
 	ID         string       `json:"id"`
 	StartedAt  time.Time    `json:"started_at"`
 	FinishedAt time.Time    `json:"finished_at,omitempty"`
@@ -36,7 +36,7 @@ type eventStore struct {
 	mu     sync.RWMutex
 	limit  int
 	nextID uint64
-	events []*comboEvent
+	events []*bridgeEvent
 }
 
 func newEventStore(limit int) *eventStore {
@@ -58,11 +58,11 @@ func (s *eventStore) setLimit(limit int) {
 	}
 }
 
-func (s *eventStore) begin(requested, primary string, stream bool) *comboEvent {
+func (s *eventStore) begin(requested, primary string, stream bool) *bridgeEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nextID++
-	e := &comboEvent{
+	e := &bridgeEvent{
 		ID:        fmt.Sprintf("%s-%04d", time.Now().Format("150405.000"), s.nextID),
 		StartedAt: time.Now(),
 		Requested: requested,
@@ -70,14 +70,14 @@ func (s *eventStore) begin(requested, primary string, stream bool) *comboEvent {
 		Stream:    stream,
 		Status:    "进行中",
 	}
-	s.events = append([]*comboEvent{e}, s.events...)
+	s.events = append([]*bridgeEvent{e}, s.events...)
 	if len(s.events) > s.limit {
 		s.events = s.events[:s.limit]
 	}
 	return e
 }
 
-func (s *eventStore) stage(e *comboEvent, name, status, model, detail string, started time.Time) {
+func (s *eventStore) stage(e *bridgeEvent, name, status, model, detail string, started time.Time) {
 	if e == nil {
 		return
 	}
@@ -93,7 +93,7 @@ func (s *eventStore) stage(e *comboEvent, name, status, model, detail string, st
 	})
 }
 
-func (s *eventStore) setImageCount(e *comboEvent, count int) {
+func (s *eventStore) setImageCount(e *bridgeEvent, count int) {
 	if e == nil {
 		return
 	}
@@ -102,7 +102,7 @@ func (s *eventStore) setImageCount(e *comboEvent, count int) {
 	e.ImageCount = count
 }
 
-func (s *eventStore) finish(e *comboEvent, err error) {
+func (s *eventStore) finish(e *bridgeEvent, err error) {
 	if e == nil {
 		return
 	}
@@ -117,10 +117,10 @@ func (s *eventStore) finish(e *comboEvent, err error) {
 	e.Status = "完成"
 }
 
-func (s *eventStore) snapshot() []comboEvent {
+func (s *eventStore) snapshot() []bridgeEvent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]comboEvent, 0, len(s.events))
+	out := make([]bridgeEvent, 0, len(s.events))
 	for _, e := range s.events {
 		if e == nil {
 			continue
@@ -152,7 +152,7 @@ func eventStatusRank(value string) int {
 	}
 }
 
-func sortEventsForDisplay(events []comboEvent) {
+func sortEventsForDisplay(events []bridgeEvent) {
 	sort.SliceStable(events, func(i, j int) bool {
 		if eventStatusRank(events[i].Status) != eventStatusRank(events[j].Status) {
 			return eventStatusRank(events[i].Status) < eventStatusRank(events[j].Status)

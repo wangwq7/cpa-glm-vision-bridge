@@ -26,21 +26,20 @@ func TestManagementMetadataMatchesCurrentParameters(t *testing.T) {
 	for _, field := range metadata().ConfigFields {
 		fields[field.Name] = field
 	}
-	for _, name := range []string{"primary_output_token_limit", "vision_primary_model", "vision_input_token_budget", "vision_timeout_seconds", "vision_cancel_grace_seconds", "auto_compression_target_tokens"} {
+	for _, name := range []string{"public_model", "primary_output_token_limit", "vision_models", "vision_input_token_budget", "vision_cancel_grace_seconds", "auto_compression_target_tokens"} {
 		if _, ok := fields[name]; !ok {
 			t.Fatalf("management metadata is missing %q", name)
 		}
 	}
-	for _, name := range []string{"vision_models", "vision_output_tokens", "max_tokens", "max_output_tokens"} {
+	for _, name := range []string{"vision_primary_model", "vision_output_tokens", "strict_vision_failure", "max_tokens", "max_output_tokens"} {
 		if _, ok := fields[name]; ok {
 			t.Fatalf("management metadata still exposes %q", name)
 		}
 	}
 	checks := map[string][]string{
 		"primary_output_token_limit":     {"客户端较小值", "注入或封顶"},
-		"vision_primary_model":           {"固定 low", "不设置输出 token 上限"},
+		"vision_models":                  {"按顺序", "上下文", "超时"},
 		"vision_input_token_budget":      {"输入预算", "不是输出 token 上限"},
-		"vision_timeout_seconds":         {"stream ID", "Host ABI"},
 		"vision_cancel_grace_seconds":    {"仅在 stream_close 后", "不增加正常请求延迟"},
 		"auto_compression_target_tokens": {"摘要检查点", "显式设置输出预算"},
 	}
@@ -61,7 +60,7 @@ func TestSupportedProtocolRoutesAreHandled(t *testing.T) {
 		t.Run(protocol, func(t *testing.T) {
 			raw, _ := json.Marshal(rpcRouteRequest{ModelRouteRequest: pluginapi.ModelRouteRequest{
 				SourceFormat:   protocol,
-				RequestedModel: defaultPluginConfig().ComboModel,
+				RequestedModel: defaultPluginConfig().PublicModel,
 			}})
 			encoded, err := routeModel(raw)
 			if err != nil {
@@ -86,7 +85,7 @@ func TestResponsesStringInputIsNormalizedForTextHost(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
 			raw, err := json.Marshal(map[string]any{
-				"model":               "glm-5.2-vision-combo",
+				"model":               "glm-vision-bridge",
 				"instructions":        "Keep this instruction.",
 				"input":               "请由首选 GLM 回答",
 				"stream":              stream,
@@ -125,7 +124,7 @@ func TestResponsesStringInputIsNormalizedForTextHost(t *testing.T) {
 			if len(content) != 1 || part["type"] != "input_text" || part["text"] != "请由首选 GLM 回答" {
 				t.Fatalf("content=%#v", message["content"])
 			}
-			if root["model"] != "glm-5.2-vision-combo" ||
+			if root["model"] != "glm-vision-bridge" ||
 				root["instructions"] != "Keep this instruction." ||
 				root["stream"] != stream ||
 				root["parallel_tool_calls"] != true {
@@ -150,17 +149,17 @@ func TestResponsesArrayAndOtherProtocolsRemainUnchanged(t *testing.T) {
 		{
 			name:     "responses array",
 			protocol: "openai-response",
-			raw:      `{"model":"combo","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"stream":true}`,
+			raw:      `{"model":"bridge","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"stream":true}`,
 		},
 		{
 			name:     "openai chat",
 			protocol: "openai",
-			raw:      `{"model":"combo","input":"leave this field alone","messages":[{"role":"user","content":"hello"}]}`,
+			raw:      `{"model":"bridge","input":"leave this field alone","messages":[{"role":"user","content":"hello"}]}`,
 		},
 		{
 			name:     "claude",
 			protocol: "claude",
-			raw:      `{"model":"combo","input":"leave this field alone","messages":[{"role":"user","content":"hello"}]}`,
+			raw:      `{"model":"bridge","input":"leave this field alone","messages":[{"role":"user","content":"hello"}]}`,
 		},
 	}
 	for _, test := range tests {
@@ -176,7 +175,7 @@ func TestResponsesArrayAndOtherProtocolsRemainUnchanged(t *testing.T) {
 func TestClaudeToolResultImageIsReplacedWithoutFlatteningHistory(t *testing.T) {
 	runtime := testRuntime()
 	raw := []byte(`{
-		"model":"glm-5.2-vision-combo",
+		"model":"glm-vision-bridge",
 		"max_tokens":1024,
 		"messages":[
 			{"role":"user","content":"请根据截图定位登录失败的原因"},

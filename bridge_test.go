@@ -117,17 +117,17 @@ func TestProcessedImagesRemoveViewImageAndConstrainIndirectInspectionTools(t *te
 		{
 			name:     "openai chat",
 			protocol: "openai",
-			raw:      `{"model":"glm-5.2-vision-combo","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"shell_command","description":"Run PowerShell commands"}},{"type":"function","function":{"name":"js","description":"Run JavaScript"}},{"type":"function","function":{"name":"exec","description":"Keep exec unchanged"}},{"type":"function","function":{"name":"image_gen__imagegen","description":"Generate images"}}],"tool_choice":{"type":"function","function":{"name":"view_image"}}}`,
+			raw:      `{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"shell_command","description":"Run PowerShell commands"}},{"type":"function","function":{"name":"js","description":"Run JavaScript"}},{"type":"function","function":{"name":"exec","description":"Keep exec unchanged"}},{"type":"function","function":{"name":"image_gen__imagegen","description":"Generate images"}}],"tool_choice":{"type":"function","function":{"name":"view_image"}}}`,
 		},
 		{
 			name:     "claude messages",
 			protocol: "claude",
-			raw:      `{"model":"glm-5.2-vision-combo","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}}]}],"tools":[{"name":"view_image","description":"Inspect images"},{"name":"shell_command","description":"Run shell commands"},{"name":"js","description":"Run JavaScript"},{"name":"exec","description":"Keep exec unchanged"}],"tool_choice":{"type":"tool","name":"view_image"}}`,
+			raw:      `{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"inspect"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}}]}],"tools":[{"name":"view_image","description":"Inspect images"},{"name":"shell_command","description":"Run shell commands"},{"name":"js","description":"Run JavaScript"},{"name":"exec","description":"Keep exec unchanged"}],"tool_choice":{"type":"tool","name":"view_image"}}`,
 		},
 		{
 			name:     "openai responses",
 			protocol: "openai-response",
-			raw:      `{"model":"glm-5.2-vision-combo","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"view_image","description":"Inspect images"},{"type":"function","name":"shell_command","description":"Run shell commands"},{"type":"function","name":"js","description":"Run JavaScript"},{"type":"function","name":"exec","description":"Keep exec unchanged"}]},{"role":"user","content":[{"type":"input_text","text":"inspect"},{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}],"tools":[{"type":"function","name":"view_image","description":"Inspect images"},{"type":"function","name":"shell_command","description":"Run shell commands"},{"type":"function","name":"js","description":"Run JavaScript"},{"type":"function","name":"exec","description":"Keep exec unchanged"}],"tool_choice":{"type":"allowed_tools","mode":"auto","tools":[{"type":"function","name":"view_image"},{"type":"function","name":"shell_command"},{"type":"function","name":"js"}]}}`,
+			raw:      `{"model":"glm-vision-bridge","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"view_image","description":"Inspect images"},{"type":"function","name":"shell_command","description":"Run shell commands"},{"type":"function","name":"js","description":"Run JavaScript"},{"type":"function","name":"exec","description":"Keep exec unchanged"}]},{"role":"user","content":[{"type":"input_text","text":"inspect"},{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}],"tools":[{"type":"function","name":"view_image","description":"Inspect images"},{"type":"function","name":"shell_command","description":"Run shell commands"},{"type":"function","name":"js","description":"Run JavaScript"},{"type":"function","name":"exec","description":"Keep exec unchanged"}],"tool_choice":{"type":"allowed_tools","mode":"auto","tools":[{"type":"function","name":"view_image"},{"type":"function","name":"shell_command"},{"type":"function","name":"js"}]}}`,
 		},
 	}
 	for _, test := range tests {
@@ -148,7 +148,7 @@ func TestProcessedImagesRemoveViewImageAndConstrainIndirectInspectionTools(t *te
 			asset := assets[0]
 			context := trimToTokens(nearbyUserTask(root, asset, adapter), runtime.VisionInputTokenBudget)
 			runtime.cache.set(visualCacheKey(runtime, asset, context), "vision", "recognized image", time.Hour)
-			event := runtime.events.begin(runtime.ComboModel, runtime.PrimaryModel, false)
+			event := runtime.events.begin(runtime.PublicModel, runtime.PrimaryModel, false)
 			body, images, err := preparePrimaryBody([]byte(test.raw), test.protocol, runtime, "", event)
 			if err != nil || images != 1 {
 				t.Fatalf("images=%d err=%v", images, err)
@@ -220,8 +220,8 @@ func TestProcessedImageToolPolicyIsIdempotent(t *testing.T) {
 func TestPreparePrimaryBodyReportsHistoricalImagePlan(t *testing.T) {
 	runtime := testRuntime()
 	defer runtime.cache.close()
-	event := runtime.events.begin("combo", runtime.PrimaryModel, false)
-	raw := []byte(`{"model":"glm-5.2-vision-combo","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},{"role":"assistant","content":"seen"},{"role":"user","content":"continue the code discussion"}]}`)
+	event := runtime.events.begin("bridge", runtime.PrimaryModel, false)
+	raw := []byte(`{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},{"role":"assistant","content":"seen"},{"role":"user","content":"continue the code discussion"}]}`)
 	body, images, err := preparePrimaryBody(raw, "openai", runtime, "", event)
 	if err != nil || images != 1 || strings.Contains(string(body), "data:image") {
 		t.Fatalf("images=%d err=%v body=%s", images, err, body)
@@ -241,8 +241,8 @@ func TestPreparePrimaryBodyReportsHistoricalImagePlan(t *testing.T) {
 
 func TestUnreferencedHistoricalImagesDoNotConstrainCurrentTools(t *testing.T) {
 	runtime := testRuntime()
-	raw := `{"model":"glm-5.2-vision-combo","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},{"role":"assistant","content":"seen"},{"role":"user","content":"continue the repository work"}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"shell_command","description":"Run commands"}},{"type":"function","function":{"name":"js","description":"Run JavaScript"}}],"tool_choice":"auto"}`
-	event := runtime.events.begin(runtime.ComboModel, runtime.PrimaryModel, false)
+	raw := `{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},{"role":"assistant","content":"seen"},{"role":"user","content":"continue the repository work"}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"shell_command","description":"Run commands"}},{"type":"function","function":{"name":"js","description":"Run JavaScript"}}],"tool_choice":"auto"}`
+	event := runtime.events.begin(runtime.PublicModel, runtime.PrimaryModel, false)
 	body, images, err := preparePrimaryBody([]byte(raw), "openai", runtime, "", event)
 	if err != nil || images != 1 {
 		t.Fatalf("images=%d err=%v", images, err)
@@ -261,8 +261,8 @@ func TestUnreferencedHistoricalImagesDoNotConstrainCurrentTools(t *testing.T) {
 
 func TestTextOnlyRequestsKeepImageInspectionTools(t *testing.T) {
 	runtime := testRuntime()
-	raw := `{"model":"glm-5.2-vision-combo","messages":[{"role":"user","content":"inspect the repository"}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"shell_command","description":"Run commands"}},{"type":"function","function":{"name":"js","description":"Run JavaScript"}},{"type":"function","function":{"name":"exec","description":"Keep exec unchanged"}}],"tool_choice":{"type":"function","function":{"name":"view_image"}}}`
-	event := runtime.events.begin(runtime.ComboModel, runtime.PrimaryModel, false)
+	raw := `{"model":"glm-vision-bridge","messages":[{"role":"user","content":"inspect the repository"}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"shell_command","description":"Run commands"}},{"type":"function","function":{"name":"js","description":"Run JavaScript"}},{"type":"function","function":{"name":"exec","description":"Keep exec unchanged"}}],"tool_choice":{"type":"function","function":{"name":"view_image"}}}`
+	event := runtime.events.begin(runtime.PublicModel, runtime.PrimaryModel, false)
 	body, images, err := preparePrimaryBody([]byte(raw), "openai", runtime, "", event)
 	if err != nil || images != 0 {
 		t.Fatalf("images=%d err=%v", images, err)
@@ -362,40 +362,51 @@ func toolChoiceReferences(value any, name string) bool {
 	return false
 }
 
-func TestManagementPageContainsUnifiedControls(t *testing.T) {
+func TestManagementPageMatchesV1Contract(t *testing.T) {
 	runtime := testRuntime()
-	runtime.VisionTimeoutSeconds = 30
+	runtime.VisionModels[0].TimeoutSeconds = 30
 	runtime.VisionCancelGraceSeconds = 25
 	html := managementHTML(runtime)
-	for _, want := range []string{"视觉桥接 v0.7.1", "OpenAI Chat", "Responses", "Claude Messages", "路由预览", "历史图片策略", "v0.7 安全历史压缩", "v0.7 推荐长上下文方案", "应用推荐值", "64,000 输出上限", "最终文本输出上限", "客户端较小值保留", "820,000", "当前安全余量", "摘要边界不会切断调用与结果", "摘要检查点", "显式设置输出预算", "固定归档标记", "文本备用模型 1", "固定 low 思考", "不设置输出 token 上限", "按实际截图的准确率和完成耗时排序", "可取消识别超时", "填写 30", "首包前仍受 Host ABI 限制", "取消确认等待", "填写 25", "正常请求不增加此延迟", "setValue('primary_output_token_limit',C.primary_output_token_limit)", "primary_output_token_limit:n('primary_output_token_limit')", "setValue('vision_cancel_grace_seconds',C.vision_cancel_grace_seconds)", "vision_cancel_grace_seconds:n('vision_cancel_grace_seconds')", `"primary_output_token_limit":64000`, `"vision_timeout_seconds":30`, `"vision_cancel_grace_seconds":25`, "缓存键包含图片与附近任务", "保存并重新加载插件"} {
+
+	for _, want := range []string{
+		"GLM Vision Bridge",
+		"v<span id=\"ver\">-</span>",
+		"OpenAI Chat / Responses / Claude Messages",
+		"路由流程",
+		"视觉模型链",
+		"输出上限",
+		"历史图片策略",
+		"历史压缩",
+		"缓存与限制",
+		"vision_models",
+		"public_model",
+		"primary_output_token_limit",
+		"vision_cancel_grace_seconds",
+		`"version":"1.0.0"`,
+		`"timeout_seconds":30`,
+		`"vision_cancel_grace_seconds":25`,
+		`fetch('/v0/management/plugins/glm-vision-bridge/config'`,
+		`method:'PATCH'`,
+	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing %q", want)
 		}
 	}
-	for _, stale := range []string{"视觉桥接 v0.4.1.2", "单模型软延迟预算（秒）", "CPA Host 暂不支持取消", "生产实测推荐 20 秒", "生产建议保持 15 秒", "旧工具轨迹先本地归档", "先归档旧工具执行轨迹", "建议低于工作预算约 15%–25%", "例如 1048576"} {
-		if strings.Contains(html, stale) {
-			t.Fatalf("stale management text %q is still present", stale)
-		}
-	}
-	for _, removed := range []string{"vision_output_tokens", "识别输出上限"} {
-		if strings.Contains(html, removed) {
-			t.Fatalf("removed management field %q is still present", removed)
-		}
-	}
-	for snippet, wantCount := range map[string]int{
-		`name="primary_output_token_limit"`:                                     1,
-		"setValue('primary_output_token_limit',C.primary_output_token_limit)":   1,
-		"primary_output_token_limit:n('primary_output_token_limit')":            1,
-		`name="vision_cancel_grace_seconds"`:                                    1,
-		"setValue('vision_cancel_grace_seconds',C.vision_cancel_grace_seconds)": 1,
-		"vision_cancel_grace_seconds:n('vision_cancel_grace_seconds')":          1,
+
+	for _, stale := range []string{
+		"vision_primary_model",
+		"vision_backup_model_1",
+		"strict_vision_failure",
+		"vision_output_tokens",
 	} {
-		if got := strings.Count(html, snippet); got != wantCount {
-			t.Fatalf("%q occurs %d times, want %d", snippet, got, wantCount)
+		if strings.Contains(html, stale) {
+			t.Fatalf("stale management contract %q is still present", stale)
 		}
+	}
+	if strings.Contains(html, managementDataMarker) {
+		t.Fatal("management data marker was not replaced")
 	}
 }
-
 func TestRenderManagementPreview(t *testing.T) {
 	path := os.Getenv("VB_PREVIEW_PATH")
 	if path == "" {
@@ -406,15 +417,14 @@ func TestRenderManagementPreview(t *testing.T) {
 	}
 }
 
-func TestSingleComboModelIsExposed(t *testing.T) {
+func TestSingleBridgeModelIsExposed(t *testing.T) {
 	runtime := testRuntime()
-	runtime.ComboAliases = []string{"glm-vision-bridge", "legacy-alias"}
-	models := comboModels(runtime)
-	if len(models) != 1 || models[0].ID != "glm-5.2-vision-combo" {
+	models := bridgeModels(runtime)
+	if len(models) != 1 || models[0].ID != "glm-vision-bridge" {
 		raw, _ := json.Marshal(models)
-		t.Fatalf("expected only combo_model, got %s", raw)
+		t.Fatalf("expected one public model, got %s", raw)
 	}
 	if models[0].InputTokenLimit != int64(runtime.PrimaryContextBudgetTokens) || models[0].OutputTokenLimit != int64(runtime.PrimaryOutputTokenLimit) || models[0].MaxCompletionTokens != int64(runtime.PrimaryOutputTokenLimit) {
-		t.Fatalf("unexpected combo token metadata: %#v", models[0])
+		t.Fatalf("unexpected bridge token metadata: %#v", models[0])
 	}
 }

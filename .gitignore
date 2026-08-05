@@ -1,12 +1,10 @@
-._*
-glm-vision-combo.so
-glm-vision-combo.h
+dist/
+*.so
+*.h
 *.test
 .DS_Store
+._*
+coverage.out
 management-preview*.html
 management-preview*.png
-management-settings*.png
 test-results/
-dist/
-__pycache__/
-*.pyc

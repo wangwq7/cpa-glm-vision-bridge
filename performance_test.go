@@ -19,7 +19,7 @@ func BenchmarkTransformPureTextLargeHistory(b *testing.B) {
 		}
 		items = append(items, map[string]any{"role": role, "content": fmt.Sprintf("%02d:%s", index, strings.Repeat("x", 32000))})
 	}
-	raw, _ := json.Marshal(map[string]any{"model": "glm-5.2-vision-combo", "messages": items})
+	raw, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "messages": items})
 	b.ReportAllocs()
 	b.SetBytes(int64(len(raw)))
 	b.ResetTimer()
@@ -36,7 +36,7 @@ func BenchmarkTransformPureTextLargeHistory(b *testing.B) {
 
 func BenchmarkNormalizeResponsesStringInput(b *testing.B) {
 	largeArrayRequest, _ := json.Marshal(map[string]any{
-		"model":        "glm-5.2-vision-combo",
+		"model":        "glm-vision-bridge",
 		"instructions": strings.Repeat("system rules ", 8192),
 		"input": []any{map[string]any{
 			"role": "user",
@@ -48,7 +48,7 @@ func BenchmarkNormalizeResponsesStringInput(b *testing.B) {
 		"stream": true,
 	})
 	stringRequest, _ := json.Marshal(map[string]any{
-		"model":        "glm-5.2-vision-combo",
+		"model":        "glm-vision-bridge",
 		"instructions": strings.Repeat("system rules ", 8192),
 		"input":        "latest question",
 		"stream":       false,
@@ -68,7 +68,7 @@ func BenchmarkNormalizeResponsesStringInput(b *testing.B) {
 		{name: "optimized", run: func(raw []byte) ([]byte, bool, error) {
 			return normalizeResponsesStringInput(raw, "openai-response")
 		}},
-		{name: "legacy", run: normalizeResponsesStringInputLegacy},
+		{name: "fallback", run: normalizeResponsesStringInputDecodedFallback},
 	}
 	for _, implementation := range implementations {
 		for _, request := range requests {
@@ -90,7 +90,7 @@ func BenchmarkPrepareResponsesLargeHistory(b *testing.B) {
 	cfg := testRuntime()
 	defer cfg.cache.close()
 	raw, _ := json.Marshal(map[string]any{
-		"model":        "glm-5.2-vision-combo",
+		"model":        "glm-vision-bridge",
 		"instructions": strings.Repeat("system rules ", 8192),
 		"input": []any{map[string]any{
 			"role": "user",
@@ -111,16 +111,16 @@ func BenchmarkPrepareResponsesLargeHistory(b *testing.B) {
 			}
 		}
 	})
-	b.Run("legacy", func(b *testing.B) {
+	b.Run("fallback", func(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(int64(len(raw)))
 		for range b.N {
 			body, images, err := transformRequestWithPlan(raw, "openai-response", cfg, func(visualAsset, string) (string, error) {
-				b.Fatal("pure text legacy benchmark called vision")
+				b.Fatal("pure text fallback benchmark called vision")
 				return "", nil
 			}, nil)
 			if err == nil {
-				body, _, err = normalizeResponsesStringInputLegacy(body)
+				body, _, err = normalizeResponsesStringInputDecodedFallback(body)
 			}
 			if err != nil || images != 0 || len(body) != len(raw) {
 				b.Fatalf("bytes=%d images=%d err=%v", len(body), images, err)
@@ -133,7 +133,7 @@ func BenchmarkPrepareFinalCheckpointReuse(b *testing.B) {
 	var calls atomic.Int32
 	cfg := testRuntime()
 	defer cfg.cache.close()
-	cfg.historySummarizer = func(string, runtimeConfig, string, *comboEvent) (string, error) {
+	cfg.historySummarizer = func(string, runtimeConfig, string, *bridgeEvent) (string, error) {
 		calls.Add(1)
 		return "stable checkpoint summary", nil
 	}
@@ -149,7 +149,7 @@ func BenchmarkPrepareFinalCheckpointReuse(b *testing.B) {
 		}
 		items = append(items, map[string]any{"role": role, "content": fmt.Sprintf("recent-%d", index)})
 	}
-	raw, _ := json.Marshal(map[string]any{"model": "glm-5.2-vision-combo", "messages": items})
+	raw, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "messages": items})
 	if _, err := prepareFinalTextBody(raw, cfg, "", nil); err != nil {
 		b.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func BenchmarkTransformManyArchivedImages(b *testing.B) {
 		)
 	}
 	items = append(items, map[string]any{"role": "user", "content": "continue discussing code"})
-	raw, _ := json.Marshal(map[string]any{"model": "glm-5.2-vision-combo", "messages": items})
+	raw, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "messages": items})
 	b.ReportAllocs()
 	b.SetBytes(int64(len(raw)))
 	b.ResetTimer()
@@ -222,7 +222,7 @@ func BenchmarkPrepareFinalLargeToolHistory(b *testing.B) {
 		)
 	}
 	items = append(items, map[string]any{"role": "user", "content": "latest follow-up"})
-	raw, _ := json.Marshal(map[string]any{"model": "glm-5.2-vision-combo", "messages": items})
+	raw, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "messages": items})
 	got, err := prepareFinalTextBody(raw, cfg, "", nil)
 	if err != nil {
 		b.Fatal(err)
