@@ -6,6 +6,13 @@ GLM Vision Bridge 将图片交给独立视觉模型转写，再把受控的视�
 
 > 1.0 使用全新的插件 ID、文件名和配置结构，需要全新安装。已在 CLIProxyAPI v7.2.119、Linux amd64 环境完成文本、图片、多轮和流式验证。
 
+
+---
+
+> 🏅 本项目已获 [LINUX DO](https://linux.do) 社区认可
+
+---
+
 ## 特性
 
 - 支持 OpenAI Chat、OpenAI Responses 和 Claude Messages。
