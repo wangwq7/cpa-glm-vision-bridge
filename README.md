@@ -9,7 +9,7 @@ GLM Vision Bridge 将图片交给独立视觉模型转写，再把受控的视�
 
 ---
 
-> 🏅 本项目已获 [LINUX DO](https://linux.do) 社区认可
+> 🏅 本项目已链接认可 [LINUX DO](https://linux.do/t/topic/2707846) 社区
 
 ---
 
