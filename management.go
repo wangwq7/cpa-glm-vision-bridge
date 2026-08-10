@@ -9,17 +9,11 @@ import (
 )
 
 type managementRegistrationResponse struct {
-	Routes    []managementRoute `json:"routes,omitempty"`
-	Resources []resourceRoute   `json:"resources,omitempty"`
+	Routes []managementRoute `json:"routes,omitempty"`
 }
 type managementRoute struct {
 	Method string `json:"Method"`
 	Path   string `json:"Path"`
-}
-type resourceRoute struct {
-	Path        string `json:"Path"`
-	Menu        string `json:"Menu"`
-	Description string `json:"Description"`
 }
 type managementResponse struct {
 	StatusCode int         `json:"StatusCode"`
@@ -30,10 +24,10 @@ type managementResponse struct {
 func managementRegistration() managementRegistrationResponse {
 	return managementRegistrationResponse{
 		Routes: []managementRoute{
+			{Method: http.MethodGet, Path: "/glm-vision-bridge"},
 			{Method: http.MethodGet, Path: "/glm-vision-bridge/events"},
 			{Method: http.MethodGet, Path: "/glm-vision-bridge/model-catalog"},
 		},
-		Resources: []resourceRoute{{Path: "/open", Menu: "GLM Vision Bridge", Description: "查看桥接事件、视觉处理链路并编辑配置。"}},
 	}
 }
 func managementHandle(raw []byte) ([]byte, error) {
