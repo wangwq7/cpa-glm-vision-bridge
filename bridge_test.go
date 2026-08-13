@@ -108,7 +108,7 @@ func TestSingleFlightRunsExtractionOnce(t *testing.T) {
 	}
 }
 
-func TestProcessedImagesRemoveViewImageAndConstrainIndirectInspectionTools(t *testing.T) {
+func TestProcessedImagesRetainViewImageAndConstrainIndirectInspectionTools(t *testing.T) {
 	tests := []struct {
 		name     string
 		protocol string
@@ -157,8 +157,9 @@ func TestProcessedImagesRemoveViewImageAndConstrainIndirectInspectionTools(t *te
 			if err := json.Unmarshal(body, &got); err != nil {
 				t.Fatal(err)
 			}
-			if toolChoiceReferences(got["tool_choice"], "view_image") {
-				t.Fatalf("tool_choice still references removed tool: %s", body)
+			// view_image is retained, so tool_choice pointing at it is preserved.
+			if !toolChoiceReferences(got["tool_choice"], "view_image") {
+				t.Fatalf("tool_choice should still reference view_image: %s", body)
 			}
 			assertProcessedImageToolPolicy(t, got["tools"])
 			if test.name == "openai chat" {
@@ -203,9 +204,9 @@ func TestProcessedImagesRemoveViewImageAndConstrainIndirectInspectionTools(t *te
 }
 
 func TestProcessedImageToolPolicyIsIdempotent(t *testing.T) {
-	raw := []byte(`{"tools":[{"type":"function","name":"shell_command","description":"Run commands"},{"type":"function","name":"js","description":"Run JavaScript"}]}`)
+	raw := []byte(`{"tools":[{"type":"function","name":"shell_command","description":"Run commands"},{"type":"function","name":"js","description":"Run JavaScript"},{"type":"function","name":"view_image","description":"Inspect images"}]}`)
 	first, firstResult, err := applyProcessedImageToolPolicy(raw, protocolAdapters[protocolOpenAIChat])
-	if err != nil || firstResult.ConstrainedTools != 2 {
+	if err != nil || firstResult.ConstrainedTools != 2 || !firstResult.ConstrainedViewImage {
 		t.Fatalf("first result=%+v err=%v", firstResult, err)
 	}
 	second, secondResult, err := applyProcessedImageToolPolicy(first, protocolAdapters[protocolOpenAIChat])
@@ -214,6 +215,9 @@ func TestProcessedImageToolPolicyIsIdempotent(t *testing.T) {
 	}
 	if strings.Count(string(second), currentImageToolPolicyMarker) != 2 {
 		t.Fatalf("policy duplicated or missing: %s", second)
+	}
+	if strings.Count(string(second), viewImageGuidanceMarker) != 1 {
+		t.Fatalf("view_image guidance duplicated or missing: %s", second)
 	}
 }
 
@@ -284,7 +288,8 @@ func TestTextOnlyRequestsKeepImageInspectionTools(t *testing.T) {
 
 func assertProcessedImageToolPolicy(t *testing.T, value any) {
 	t.Helper()
-	assertToolListExcludes(t, value, "view_image")
+	assertToolListContains(t, value, "view_image")
+	assertToolDescriptionContains(t, value, "view_image", viewImageGuidanceMarker)
 	assertToolListContains(t, value, "shell_command")
 	assertToolListContains(t, value, "js")
 	assertToolListContains(t, value, "exec")
@@ -360,6 +365,134 @@ func toolChoiceReferences(value any, name string) bool {
 		}
 	}
 	return false
+}
+
+
+func TestViewImageRetainedWithGuidanceAfterImageProcessing(t *testing.T) {
+	runtime := testRuntime()
+	raw := `{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"identify"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"exec","description":"Run exec"}}],"tool_choice":{"type":"function","function":{"name":"view_image"}}}`
+	body, images, err := transformOpenAIRequest([]byte(raw), runtime, func(visualAsset, string) (string, error) {
+		return "visual analysis result", nil
+	})
+	if err != nil || images != 1 {
+		t.Fatalf("images=%d err=%v", images, err)
+	}
+	adapter, _ := adapterForProtocol("openai")
+	body, _, err = applyProcessedImageToolPolicy(body, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	assertToolListContains(t, got["tools"], "view_image")
+	assertToolDescriptionContains(t, got["tools"], "view_image", viewImageGuidanceMarker)
+	if !toolChoiceReferences(got["tool_choice"], "view_image") {
+		t.Fatalf("tool_choice should still reference view_image: %s", body)
+	}
+	if strings.Contains(string(body), "data:image") {
+		t.Fatalf("raw image leaked: %s", body)
+	}
+}
+
+func TestAgentReanalysisImageInToolResultGetsTranscribed(t *testing.T) {
+	runtime := testRuntime()
+	raw := []byte(`{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"check this"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},{"role":"assistant","content":"I see the image."},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"view_image","arguments":"{\"focus\":\"button color\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,Yg=="}}]}]}`)
+	called := make([]string, 0)
+	body, images, err := transformOpenAIRequest(raw, runtime, func(asset visualAsset, _ string) (string, error) {
+		called = append(called, asset.URL)
+		return "reanalysis result for focus: button color", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if images == 0 {
+		t.Fatalf("expected images to be detected, got 0")
+	}
+	foundReanalysis := false
+	for _, url := range called {
+		if strings.Contains(url, "Yg==") {
+			foundReanalysis = true
+		}
+	}
+	if !foundReanalysis {
+		t.Fatalf("reanalysis image was not processed, called=%v", called)
+	}
+	if !strings.Contains(string(body), "reanalysis result") {
+		t.Fatalf("reanalysis result not in body: %s", body)
+	}
+	if strings.Contains(string(body), "data:image") {
+		t.Fatalf("raw image leaked: %s", body)
+	}
+}
+
+func TestViewImageNotConstrainedWithoutProcessedImages(t *testing.T) {
+	runtime := testRuntime()
+	raw := `{"model":"glm-vision-bridge","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}}]}`
+	event := runtime.events.begin(runtime.PublicModel, runtime.PrimaryModel, false)
+	body, images, err := preparePrimaryBody([]byte(raw), "openai", runtime, "", event)
+	if err != nil || images != 0 {
+		t.Fatalf("images=%d err=%v", images, err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	assertToolListContains(t, got["tools"], "view_image")
+	assertToolDescriptionEquals(t, got["tools"], "view_image", "Inspect images")
+}
+
+func TestViewImageGuidancePreservedAcrossProtocols(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		raw      string
+	}{
+		{
+			name:     "claude",
+			protocol: "claude",
+			raw:      `{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"YQ=="}}]}],"tools":[{"name":"view_image","description":"Inspect images"},{"name":"exec","description":"Run exec"}]}`,
+		},
+		{
+			name:     "responses",
+			protocol: "openai-response",
+			raw:      `{"model":"glm-vision-bridge","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"view_image","description":"Inspect images"}]},{"role":"user","content":[{"type":"input_text","text":"look"},{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]}],"tools":[{"type":"function","name":"view_image","description":"Inspect images"}]}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := testRuntime()
+			body, images, err := transformRequest([]byte(test.raw), test.protocol, runtime, func(visualAsset, string) (string, error) {
+				return "visual analysis", nil
+			})
+			if err != nil || images != 1 {
+				t.Fatalf("images=%d err=%v", images, err)
+			}
+			adapter, _ := adapterForProtocol(test.protocol)
+			body, _, err = applyProcessedImageToolPolicy(body, adapter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatal(err)
+			}
+			tools := got["tools"]
+			assertToolListContains(t, tools, "view_image")
+			assertToolDescriptionContains(t, tools, "view_image", viewImageGuidanceMarker)
+			if test.protocol == "openai-response" {
+				input, _ := got["input"].([]any)
+				for _, item := range input {
+					obj, _ := item.(map[string]any)
+					if stringValue(obj["type"]) == "additional_tools" {
+						assertToolListContains(t, obj["tools"], "view_image")
+						assertToolDescriptionContains(t, obj["tools"], "view_image", viewImageGuidanceMarker)
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestManagementPageMatchesV1Contract(t *testing.T) {

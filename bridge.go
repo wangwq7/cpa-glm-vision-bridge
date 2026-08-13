@@ -42,8 +42,8 @@ func preparePrimaryBody(raw []byte, protocol string, cfg runtimeConfig, callback
 		return nil, images, err
 	}
 	detail := "本轮相关图片已转换为视觉记忆，并加入不得仅为重复读取这些图片而调用客户端工具的约束。"
-	if toolPolicy.RemovedViewImage {
-		detail += " 已移除 view_image。"
+	if toolPolicy.ConstrainedViewImage {
+		detail += " view_image 已保留并附加按需重分析引导。"
 	}
 	if toolPolicy.ConstrainedTools > 0 {
 		detail += fmt.Sprintf(" 已为 %d 个 shell_command/js 工具定义补充同一约束。", toolPolicy.ConstrainedTools)
