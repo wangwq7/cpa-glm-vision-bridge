@@ -14,7 +14,7 @@ const (
 	pluginID       = "glm-vision-bridge"
 	pluginName     = "GLM Vision Bridge"
 	repositoryURL  = "https://github.com/wangwq7/cpa-glm-vision-bridge"
-	defaultVersion = "1.0.0"
+	defaultVersion = "1.1.0"
 )
 
 var version = defaultVersion
