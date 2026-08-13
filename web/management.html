@@ -264,7 +264,7 @@ input.key{width:160px;height:36px;font-size:12px}
 
 <div class="savebar">
   <div class="savebar-inner">
-    <input class="key" id="mkey" type="password" placeholder="管理密钥" autocomplete="off">
+    <input class="key" id="mkey" type="password" placeholder="管理密钥" autocomplete="off"><button class="btn" onclick="window.__loadMgmtData()" style="margin-left:6px;padding:6px 14px">加载</button>
     <button class="btn primary" id="save">保存</button>
     <button class="btn" id="reload">刷新</button>
     <div class="msg" id="msg"></div>
@@ -272,7 +272,22 @@ input.key{width:160px;height:36px;font-size:12px}
 </div>
 
 <script>
-const D=__GLM_VISION_BRIDGE_DATA__,c=D.config,ml=[...new Set(D.models||[])].sort(),ev=D.events||[];
+let D=__GLM_VISION_BRIDGE_DATA__;
+if(!D||!D.config){D={config:{},models:[],events:[]};
+window.__loadMgmtData=async()=>{
+try{const $=s=>document.querySelector(s);
+const k=$('#mkey').value.trim();const h={};if(k)h.Authorization='Bearer '+k;
+const fk=async(u)=>{const r=await fetch(u,h);if(!r.ok)throw r.status+':'+await r.text();return r.json()};
+const [cfg,models,evts]=await Promise.all([fk('/v0/management/glm-vision-bridge/config'),fk('/v0/management/glm-vision-bridge/model-catalog'),fk('/v0/management/glm-vision-bridge/events')]);
+D={config:cfg,models:models||[],events:evts||[]};
+c=D.config;ml=[...new Set(D.models||[])].sort();ev=D.events||[];
+renderV();renderE();renderPreview();for(const[kk,vv]of Object.entries(c))setF(kk,vv);renderPreview();
+$('#msg').textContent='数据加载成功';$('#msg').className='msg ok';
+}catch(e){$('#msg').textContent='加载失败：'+e;$('#msg').className='msg err'}
+};
+}else{window.__loadMgmtData=()=>{};}
+let c=D.config,ml=[...new Set(D.models||[])].sort(),ev=D.events||[];
+function initPage(){renderV();renderE();renderPreview();for(const[kk,vv]of Object.entries(c))setF(kk,vv);renderPreview();}
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const nv=n=>Number($(`[name="${n}"]`).value),vv=n=>$(`[name="${n}"]`).value,ck=n=>$(`[name="${n}"]`).checked;
@@ -293,6 +308,7 @@ $('#reload').onclick=()=>location.reload();
 $('#form').addEventListener('input',renderPreview);
 $('#save').onclick=async()=>{const m=$('#msg');const pm=vv('public_model').trim(),pr=vv('primary_model').trim(),fb=['text_fallback_0','text_fallback_1','text_fallback_2'].map(vv).map(x=>x.trim()).filter(Boolean),vs=vFromForm(),cm=vv('auto_compression_model').trim();const at=[pr,...fb,...(cm?[cm]:[])],cf=[...new Set(vs.map(x=>x.model).filter(x=>at.includes(x)))];const ctx=nv('primary_context_tokens'),inp=nv('primary_context_budget_tokens'),out=nv('primary_output_token_limit'),th=nv('auto_compression_threshold_tokens'),tg=nv('auto_compression_target_tokens');m.className='msg';if(!pm||!pr)return m.textContent='请填写对外模型和主文本模型',m.classList.add('err');if([...at,...vs.map(x=>x.model)].includes(pm))return m.textContent='对外模型不能指向上游',m.classList.add('err');if(!vs.length||!vs.some(x=>x.enabled))return m.textContent='至少启用一个视觉模型',m.classList.add('err');if(cf.length)return m.textContent=`模型重复：${cf.join('、')}`,m.classList.add('err');if(vs.some(x=>x.context_budget>=x.context_limit))return m.textContent='视觉预算必须低于上下文',m.classList.add('err');if(!(ctx>inp&&inp+out<=ctx&&inp>th&&th>tg))return m.textContent='预算关系无效',m.classList.add('err');const body={enabled:true,public_model:pm,primary_model:pr,primary_context_tokens:ctx,primary_context_budget_tokens:inp,primary_output_token_limit:out,text_fallback_models:fb,vision_models:vs,vision_prompt:vv('vision_prompt'),vision_input_token_budget:nv('vision_input_token_budget'),vision_image_token_reserve:nv('vision_image_token_reserve'),vision_cancel_grace_seconds:nv('vision_cancel_grace_seconds'),cache_ttl_seconds:nv('cache_ttl_seconds'),cache_max_entries:nv('cache_max_entries'),cache_path:vv('cache_path'),event_log_max_entries:nv('event_log_max_entries'),on_vision_failure:vv('on_vision_failure'),max_images_per_request:nv('max_images_per_request'),max_concurrent_extractions:nv('max_concurrent_extractions'),max_image_data_bytes:nv('max_image_data_bytes'),allow_remote_image_urls:ck('allow_remote_image_urls'),history_attachment_mode:vv('history_attachment_mode'),history_attachment_compact_chars:nv('history_attachment_compact_chars'),history_attachment_restore_max_attachments:nv('history_attachment_restore_max_attachments'),auto_compression_enabled:ck('auto_compression_enabled'),auto_compression_threshold_tokens:th,auto_compression_target_tokens:tg,auto_compression_keep_recent_turns:nv('auto_compression_keep_recent_turns'),auto_compression_model:cm};const h={'Content-Type':'application/json'};const k=$('#mkey').value.trim();if(k)h.Authorization='Bearer '+k;m.textContent='保存中…';try{const r=await fetch('/v0/management/plugins/glm-vision-bridge/config',{method:'PATCH',headers:h,body:JSON.stringify(body)});if(!r.ok)throw new Error(`${r.status}: ${await r.text()}`);m.textContent='保存成功，重新加载中…';m.classList.add('ok');setTimeout(()=>location.reload(),800)}catch(e){m.textContent='失败：'+e.message;m.classList.add('err')}};
 init();
+if(D.config&&D.config.public_model){initPage();}
 </script>
 </body>
 </html>
