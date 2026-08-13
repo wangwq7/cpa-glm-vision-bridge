@@ -515,7 +515,7 @@ func TestManagementPageMatchesV1Contract(t *testing.T) {
 		"public_model",
 		"primary_output_token_limit",
 		"vision_cancel_grace_seconds",
-		`"version":"1.1.0"`,
+		`"version":"1.1.1"`,
 		`"timeout_seconds":30`,
 		`"vision_cancel_grace_seconds":25`,
 		`fetch('/v0/management/plugins/glm-vision-bridge/config'`,
