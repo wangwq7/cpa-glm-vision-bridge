@@ -83,7 +83,12 @@ func prepareFinalTextBody(raw []byte, cfg runtimeConfig, callbackID string, even
 		delta := append([]any(nil), compressible[checkpointPrefix:prefixCount]...)
 		sourceItems = append([]any{historySummaryItem(field, checkpointSummary)}, delta...)
 	}
-	historyRaw, err := json.Marshal(sourceItems)
+	adapter, _ := detectProtocolAdapterFromRoot(root, false)
+	if adapter.protocol == "" {
+		adapter = protocolAdapters[protocolOpenAIChat]
+	}
+	strippedItems := stripImagesFromHistory(sourceItems, adapter)
+	historyRaw, err := json.Marshal(strippedItems)
 	if err != nil {
 		return nil, fmt.Errorf("cannot encode history checkpoint input: %w", err)
 	}
@@ -247,6 +252,50 @@ func historyCheckpointKeys(field string, items []any, cfg runtimeConfig) ([]stri
 		keys = append(keys, "history-checkpoint:"+hex.EncodeToString(digest.Sum(nil)))
 	}
 	return keys, nil
+}
+
+// stripImagesFromHistory replaces all image blocks in conversation items with
+// short text markers before sending to the summarizer. This prevents base64
+// image data from being truncated by the compression model and leaving
+// corrupted fragments in the summary or subsequent requests.
+func stripImagesFromHistory(items []any, adapter protocolAdapter) []any {
+	stripped := make([]any, len(items))
+	for i, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			stripped[i] = item
+			continue
+		}
+		content, ok := obj["content"].([]any)
+		if !ok {
+			stripped[i] = item
+			continue
+		}
+		newContent := make([]any, 0, len(content))
+		changed := false
+		for _, block := range content {
+			blockObj, ok := block.(map[string]any)
+			if !ok {
+				newContent = append(newContent, block)
+				continue
+			}
+			blockType := strings.ToLower(strings.TrimSpace(stringValue(blockObj["type"])))
+			if isImageBlockType(blockType) {
+				newContent = append(newContent, adapter.makeTextBlock("[historical image archived]"))
+				changed = true
+				continue
+			}
+			newContent = append(newContent, block)
+		}
+		if !changed {
+			stripped[i] = item
+			continue
+		}
+		cloned := cloneMap(obj)
+		cloned["content"] = newContent
+		stripped[i] = cloned
+	}
+	return stripped
 }
 
 func runHistorySummarizer(history string, cfg runtimeConfig, callbackID string, event *bridgeEvent) (string, error) {
