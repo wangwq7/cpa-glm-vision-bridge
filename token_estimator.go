@@ -39,23 +39,13 @@ func estimateExecutorInputTokens(body []byte, cfg runtimeConfig) int {
 	if len(mediaIssues) > 0 || len(assets) == 0 {
 		return estimateBodyTokens(body)
 	}
-	latestIndex, latestText := latestUserTurn(root, adapter)
-	for _, asset := range assets {
-		if asset.ItemIndex > latestIndex {
-			latestIndex = asset.ItemIndex
-		}
-	}
+	userIndex, latestText := latestUserTurn(root, adapter)
+	current, historical := splitCurrentVisualBatch(root, adapter, userIndex, assets)
 	full := make(map[string]bool, len(assets))
-	historical := make([]visualAsset, 0, len(assets))
-	currentCount := 0
-	for _, asset := range assets {
-		if asset.ItemIndex == latestIndex {
-			full[asset.ID] = true
-			currentCount++
-		} else {
-			historical = append(historical, asset)
-		}
+	for _, asset := range current {
+		full[asset.ID] = true
 	}
+	currentCount := len(current)
 	if cfg.HistoryAttachmentMode == "retain" {
 		for _, asset := range historical {
 			full[asset.ID] = true

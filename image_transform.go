@@ -19,7 +19,9 @@ type visualTransformPlan struct {
 	CurrentImages    int
 	HistoricalImages int
 	RestoredImages   int
+	PersistentImages int
 	ArchivedImages   int
+	OmittedMemories  int
 }
 
 func transformOpenAIRequest(raw []byte, cfg runtimeConfig, describe func(visualAsset, string) (string, error)) ([]byte, int, error) {
@@ -63,21 +65,8 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 	if len(assets) == 0 {
 		return raw, 0, nil
 	}
-	latestIndex, latestText := latestUserTurn(root, adapter)
-	for _, asset := range assets {
-		if asset.ItemIndex > latestIndex {
-			latestIndex = asset.ItemIndex
-		}
-	}
-	current := make([]visualAsset, 0)
-	historical := make([]visualAsset, 0)
-	for _, asset := range assets {
-		if asset.ItemIndex == latestIndex {
-			current = append(current, asset)
-		} else {
-			historical = append(historical, asset)
-		}
-	}
+	userIndex, latestText := latestUserTurn(root, adapter)
+	current, historical := splitCurrentVisualBatch(root, adapter, userIndex, assets)
 	if len(current) > cfg.MaxImagesPerRequest {
 		return nil, len(assets), fmt.Errorf("current turn contains %d images; maximum is %d", len(current), cfg.MaxImagesPerRequest)
 	}
@@ -105,24 +94,13 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 	}
 	for index := range assets {
 		if full[assets[index].ID] {
-			assets[index].Context = trimToTokens(nearbyUserTask(root, assets[index], adapter), cfg.VisionInputTokenBudget)
-		}
-	}
-	if reportPlan != nil {
-		restored := 0
-		for _, asset := range historical {
-			if full[asset.ID] {
-				restored++
+			contextText := nearbyUserTask(root, assets[index], adapter)
+			if assets[index].ItemIndex < userIndex {
+				contextText = latestText
 			}
+			assets[index].Context = trimToTokens(contextText, cfg.VisionInputTokenBudget)
 		}
-		reportPlan(visualTransformPlan{
-			CurrentImages:    len(current),
-			HistoricalImages: len(historical),
-			RestoredImages:   restored,
-			ArchivedImages:   len(historical) - restored,
-		})
 	}
-
 	descriptions := make(map[string]string, len(assets))
 	archived := make([]visualAsset, 0, len(historical))
 	for _, asset := range assets {
@@ -130,10 +108,50 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 			archived = append(archived, asset)
 		}
 	}
-	if len(archived) > 0 {
-		descriptions[archived[0].ID] = archivedVisualMarker(cfg.HistoryAttachmentCompactChars)
-		for _, asset := range archived[1:] {
-			descriptions[asset.ID] = "[旧图已归档]"
+	persistentDescriptions := make(map[string]string, len(archived))
+	persistentIDs := make(map[string]bool, len(archived))
+	for _, asset := range archived {
+		if key := stableVisualCacheKey(cfg, asset); key != "" {
+			if value, ok := cfg.cache.get(key); ok && strings.TrimSpace(value) != "" {
+				persistentDescriptions[asset.ID] = historicalVisualMemory(value, cfg.HistoryAttachmentCompactChars)
+				persistentIDs[asset.ID] = true
+			}
+		}
+	}
+	remainingChars := historicalVisualMemoryTotalChars
+	omittedMemories := 0
+	for index := len(archived) - 1; index >= 0; index-- {
+		asset := archived[index]
+		if !persistentIDs[asset.ID] {
+			continue
+		}
+		length := len([]rune(persistentDescriptions[asset.ID]))
+		if length > remainingChars {
+			omittedMemories++
+			persistentIDs[asset.ID] = false
+			delete(persistentDescriptions, asset.ID)
+			continue
+		}
+		remainingChars -= length
+	}
+	for _, asset := range archived {
+		if persistentIDs[asset.ID] {
+			descriptions[asset.ID] = persistentDescriptions[asset.ID]
+		}
+	}
+	markerTarget := ""
+	for _, asset := range archived {
+		if !persistentIDs[asset.ID] {
+			markerTarget = asset.ID
+			break
+		}
+	}
+	if markerTarget != "" {
+		descriptions[markerTarget] = archivedVisualMarker(cfg.HistoryAttachmentCompactChars)
+		for _, asset := range archived {
+			if !persistentIDs[asset.ID] && asset.ID != markerTarget {
+				descriptions[asset.ID] = "[旧图已归档]"
+			}
 		}
 	}
 
@@ -156,6 +174,25 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 			return nil, len(assets), err
 		}
 	}
+	if reportPlan != nil {
+		restored := 0
+		persistent := 0
+		for _, asset := range historical {
+			if full[asset.ID] {
+				restored++
+			} else if persistentIDs[asset.ID] {
+				persistent++
+			}
+		}
+		reportPlan(visualTransformPlan{
+			CurrentImages:    len(current),
+			HistoricalImages: len(historical),
+			RestoredImages:   restored,
+			PersistentImages: persistent,
+			ArchivedImages:   len(historical) - restored - persistent,
+			OmittedMemories:  omittedMemories,
+		})
+	}
 	if len(toResolve) == 0 {
 		for _, asset := range assets {
 			if !replaceAsset(root, asset.Path, descriptions[asset.ID], adapter) {
@@ -170,6 +207,7 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 	}
 	type result struct {
 		id, description string
+		cacheable       bool
 		err             error
 	}
 	jobs := make(chan visualAsset)
@@ -178,7 +216,7 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 		go func() {
 			for asset := range jobs {
 				description, err := describe(asset, asset.Context)
-				results <- result{id: asset.ID, description: description, err: err}
+				results <- result{id: asset.ID, description: description, cacheable: err == nil && strings.TrimSpace(description) != "", err: err}
 			}
 		}()
 	}
@@ -189,6 +227,7 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 		close(jobs)
 	}()
 	resolvedDescriptions := make(map[string]string, len(toResolve))
+	stableCacheable := make(map[string]bool, len(toResolve))
 	for range toResolve {
 		item := <-results
 		if item.err != nil {
@@ -198,9 +237,15 @@ func transformRequestWithPlanAndMediaHint(raw []byte, protocol string, cfg runti
 			item.description = "视觉输入未能识别；只能依据本轮文字继续，禁止猜测图片内容。"
 		}
 		resolvedDescriptions[item.id] = item.description
+		stableCacheable[item.id] = item.cacheable
 	}
 	for index, asset := range toResolve {
 		descriptions[asset.ID] = fullVisualMemory(resolvedDescriptions[asset.ID], index == 0)
+	}
+	for _, asset := range toResolve {
+		if key := stableVisualCacheKey(cfg, asset); key != "" && stableCacheable[asset.ID] {
+			cfg.cache.set(key, "vision", resolvedDescriptions[asset.ID], cacheTTL(cfg))
+		}
 	}
 	for _, asset := range assets {
 		if !replaceAsset(root, asset.Path, descriptions[asset.ID], adapter) {

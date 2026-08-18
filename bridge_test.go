@@ -235,7 +235,7 @@ func TestPreparePrimaryBodyReportsHistoricalImagePlan(t *testing.T) {
 			continue
 		}
 		for _, stage := range item.Stages {
-			if stage.Name == "历史图片处理" && strings.Contains(stage.Detail, "1 张替换为固定短归档标记") && strings.Contains(stage.Detail, "未解码旧图") {
+			if stage.Name == "历史图片处理" && strings.Contains(stage.Detail, "0 张复用持久视觉记忆") && strings.Contains(stage.Detail, "1 张替换为固定短归档标记") && strings.Contains(stage.Detail, "未解码旧图") {
 				return
 			}
 		}
@@ -367,7 +367,6 @@ func toolChoiceReferences(value any, name string) bool {
 	return false
 }
 
-
 func TestViewImageRetainedWithGuidanceAfterImageProcessing(t *testing.T) {
 	runtime := testRuntime()
 	raw := `{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"identify"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]}],"tools":[{"type":"function","function":{"name":"view_image","description":"Inspect images"}},{"type":"function","function":{"name":"exec","description":"Run exec"}}],"tool_choice":{"type":"function","function":{"name":"view_image"}}}`
@@ -399,9 +398,12 @@ func TestViewImageRetainedWithGuidanceAfterImageProcessing(t *testing.T) {
 func TestAgentReanalysisImageInToolResultGetsTranscribed(t *testing.T) {
 	runtime := testRuntime()
 	raw := []byte(`{"model":"glm-vision-bridge","messages":[{"role":"user","content":[{"type":"text","text":"check this"},{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},{"role":"assistant","content":"I see the image."},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"view_image","arguments":"{\"focus\":\"button color\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,Yg=="}}]}]}`)
+	var calledMu sync.Mutex
 	called := make([]string, 0)
 	body, images, err := transformOpenAIRequest(raw, runtime, func(asset visualAsset, _ string) (string, error) {
+		calledMu.Lock()
 		called = append(called, asset.URL)
+		calledMu.Unlock()
 		return "reanalysis result for focus: button color", nil
 	})
 	if err != nil {
@@ -411,11 +413,13 @@ func TestAgentReanalysisImageInToolResultGetsTranscribed(t *testing.T) {
 		t.Fatalf("expected images to be detected, got 0")
 	}
 	foundReanalysis := false
+	calledMu.Lock()
 	for _, url := range called {
 		if strings.Contains(url, "Yg==") {
 			foundReanalysis = true
 		}
 	}
+	calledMu.Unlock()
 	if !foundReanalysis {
 		t.Fatalf("reanalysis image was not processed, called=%v", called)
 	}
@@ -515,7 +519,7 @@ func TestManagementPageMatchesV1Contract(t *testing.T) {
 		"public_model",
 		"primary_output_token_limit",
 		"vision_cancel_grace_seconds",
-		`"version":"1.1.1"`,
+		`"version":"1.1.2"`,
 		`"timeout_seconds":30`,
 		`"vision_cancel_grace_seconds":25`,
 		`fetch('/v0/management/plugins/glm-vision-bridge/config'`,

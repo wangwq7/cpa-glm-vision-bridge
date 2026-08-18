@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -84,6 +85,9 @@ func TestHistoricalImageReferenceDetectionIsExplicit(t *testing.T) {
 		{text: "图片多了以后为什么会变慢", want: 0},
 		{text: "继续处理这个文件", want: 0},
 		{text: "document the image cache behavior", want: 0},
+		{text: "全部图片都读取成功了。开始吧", want: 0},
+		{text: "所有截图 already analyzed，继续开工", want: 0},
+		{text: "请重新识别这张截图", want: 1},
 		{text: "继续分析代码", want: 0},
 	}
 	for _, test := range tests {
@@ -424,5 +428,199 @@ func TestCPALocalAPISettings(t *testing.T) {
 	port, key = cpaLocalAPISettings([]byte("api-keys: []\n"))
 	if port != defaultCPAManagementPort || key != "" {
 		t.Fatalf("empty settings = (%d, %q)", port, key)
+	}
+}
+
+func TestParallelToolResultImagesStayInCurrentTaskThenUseStableMemory(t *testing.T) {
+	r := testRuntime()
+	defer r.cache.close()
+	first := []byte(`{"model":"glm-vision-bridge","messages":[
+		{"role":"user","content":"读取这些图片"},
+		{"role":"assistant","content":"reading"},
+		{"role":"tool","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},
+		{"role":"tool","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,Yg=="}}]},
+		{"role":"tool","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,Yw=="}}]}
+	]}`)
+	var calls atomic.Int32
+	got, count, err := transformOpenAIRequest(first, r, func(visualAsset, string) (string, error) {
+		calls.Add(1)
+		return "visual memory", nil
+	})
+	if err != nil || count != 3 || calls.Load() != 3 {
+		t.Fatalf("first count=%d calls=%d err=%v", count, calls.Load(), err)
+	}
+	if strings.Contains(string(got), "data:image") || strings.Contains(string(got), "[旧图已归档]") {
+		t.Fatalf("parallel tool images were not fully processed: %s", got)
+	}
+
+	second := []byte(`{"model":"glm-vision-bridge","messages":[
+		{"role":"user","content":"读取这些图片"},
+		{"role":"assistant","content":"reading"},
+		{"role":"tool","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,YQ=="}}]},
+		{"role":"tool","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,Yg=="}}]},
+		{"role":"tool","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,Yw=="}}]},
+		{"role":"user","content":"全部图片都读取成功了。开始吧"}
+	]}`)
+	var secondCalls atomic.Int32
+	got, count, err = transformOpenAIRequest(second, r, func(visualAsset, string) (string, error) {
+		secondCalls.Add(1)
+		return "unexpected", nil
+	})
+	if err != nil || count != 3 || secondCalls.Load() != 0 {
+		t.Fatalf("second count=%d calls=%d err=%v", count, secondCalls.Load(), err)
+	}
+	if strings.Count(string(got), "[历史图片识别结果") != 3 || strings.Contains(string(got), "data:image") {
+		t.Fatalf("stable visual memories were not reused: %s", got)
+	}
+}
+
+func TestParallelResponsesToolOutputsStayInCurrentBatch(t *testing.T) {
+	r := testRuntime()
+	defer r.cache.close()
+	raw := []byte(`{"model":"glm-vision-bridge","input":[
+		{"role":"user","content":[{"type":"input_text","text":"读取这两张图片"}]},
+		{"type":"function_call","call_id":"call-1","name":"read","arguments":"{}"},
+		{"type":"function_call_output","call_id":"call-1","output":[{"type":"input_image","image_url":"data:image/png;base64,YQ=="}]},
+		{"type":"function_call_output","call_id":"call-2","output":[{"type":"input_image","image_url":"data:image/png;base64,Yg=="}]}
+	]}`)
+	var calls atomic.Int32
+	got, count, err := transformRequest(raw, protocolResponses, r, func(_ visualAsset, context string) (string, error) {
+		calls.Add(1)
+		if !strings.Contains(context, "读取这两张图片") {
+			t.Fatalf("context=%q", context)
+		}
+		return "responses visual memory", nil
+	})
+	if err != nil || count != 2 || calls.Load() != 2 {
+		t.Fatalf("count=%d calls=%d err=%v", count, calls.Load(), err)
+	}
+	if strings.Contains(string(got), "data:image") || strings.Contains(string(got), "[旧图已归档]") {
+		t.Fatalf("responses tool images were not fully processed: %s", got)
+	}
+}
+
+func TestSequentialToolImageBatchesOnlyProcessLatestBatch(t *testing.T) {
+	r := testRuntime()
+	r.cache.close()
+	r.cache = newMemoCache(64, "")
+	defer r.cache.close()
+	r.MaxImagesPerRequest = 8
+	r.HistoryRestoreMaxAttachments = 0
+	items := []any{
+		map[string]any{"role": "user", "content": "读取这些图片"},
+		map[string]any{"role": "assistant", "content": "first batch"},
+	}
+	for index := 0; index < 8; index++ {
+		items = append(items, map[string]any{
+			"role": "tool",
+			"content": []any{map[string]any{
+				"type":      "image_url",
+				"image_url": map[string]any{"url": fmt.Sprintf("data:image/png,old-%d", index)},
+			}},
+		})
+	}
+	first, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "messages": items})
+	var firstCalls atomic.Int32
+	if _, count, err := transformOpenAIRequest(first, r, func(visualAsset, string) (string, error) {
+		firstCalls.Add(1)
+		return "old batch memory", nil
+	}); err != nil || count != 8 || firstCalls.Load() != 8 {
+		t.Fatalf("first count=%d calls=%d err=%v", count, firstCalls.Load(), err)
+	}
+	items = append(items, map[string]any{"role": "assistant", "content": "second batch"})
+	for index := 0; index < 3; index++ {
+		items = append(items, map[string]any{
+			"role": "tool",
+			"content": []any{map[string]any{
+				"type":      "image_url",
+				"image_url": map[string]any{"url": fmt.Sprintf("data:image/png,new-%d", index)},
+			}},
+		})
+	}
+	second, _ := json.Marshal(map[string]any{"model": "glm-vision-bridge", "messages": items})
+	var secondCalls atomic.Int32
+	got, count, err := transformOpenAIRequest(second, r, func(visualAsset, string) (string, error) {
+		secondCalls.Add(1)
+		return "new batch memory", nil
+	})
+	if err != nil || count != 11 || secondCalls.Load() != 3 {
+		t.Fatalf("second count=%d calls=%d err=%v", count, secondCalls.Load(), err)
+	}
+	if strings.Count(string(got), "[历史图片识别结果") != 8 || strings.Count(string(got), "[图片识别结果") != 3 {
+		t.Fatalf("tool batches were not partitioned correctly: %s", got)
+	}
+}
+
+func TestLatestUserTurnSkipsPureClaudeToolResult(t *testing.T) {
+	root := map[string]any{"messages": []any{
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "读取截图"}}},
+		map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "call-1"}}},
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "call-1"}}},
+	}}
+	index, text := latestUserTurn(root, protocolAdapters[protocolAnthropic])
+	if index != 0 || text != "读取截图" {
+		t.Fatalf("latest user turn = (%d, %q)", index, text)
+	}
+}
+
+func TestExplicitHistoricalReanalysisBypassesStableMemory(t *testing.T) {
+	r := testRuntime()
+	defer r.cache.close()
+	imageURL := "data:image/png;base64,YQ=="
+	asset := visualAsset{URL: imageURL}
+	r.cache.set(stableVisualCacheKey(r, asset), "vision", "old OCR", time.Hour)
+	raw := []byte(`{"messages":[
+		{"role":"user","content":[{"type":"text","text":"读取图片"},{"type":"image_url","image_url":{"url":"` + imageURL + `"}}]},
+		{"role":"assistant","content":"done"},
+		{"role":"user","content":"请重新识别这张截图"}
+	]}`)
+	calls := 0
+	got, _, err := transformOpenAIRequest(raw, r, func(_ visualAsset, context string) (string, error) {
+		calls++
+		if !strings.Contains(context, "重新识别") {
+			t.Fatalf("reanalysis context=%q", context)
+		}
+		return "fresh OCR", nil
+	})
+	if err != nil || calls != 1 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	if !strings.Contains(string(got), "fresh OCR") || strings.Contains(string(got), "old OCR") {
+		t.Fatalf("explicit reanalysis did not replace stable memory: %s", got)
+	}
+}
+
+func TestStableVisualCacheOnlyUsesInlineImageData(t *testing.T) {
+	r := testRuntime()
+	defer r.cache.close()
+	if key := stableVisualCacheKey(r, visualAsset{URL: "https://example.test/current.png"}); key != "" {
+		t.Fatalf("remote image URL received stable cache key: %q", key)
+	}
+	if key := stableVisualCacheKey(r, visualAsset{URL: "data:image/png;base64,YQ=="}); key == "" {
+		t.Fatal("inline image data did not receive stable cache key")
+	}
+}
+
+func TestVisionFailureFallbackIsNotPersistedAsStableMemory(t *testing.T) {
+	r := testRuntime()
+	defer r.cache.close()
+	r.OnVisionFailure = "text_only"
+	imageURL := "data:image/png;base64,YQ=="
+	raw := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"读取图片"},{"type":"image_url","image_url":{"url":"` + imageURL + `"}}]}]}`)
+	if _, _, err := transformOpenAIRequest(raw, r, func(visualAsset, string) (string, error) {
+		return "", errors.New("temporary vision failure")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if cached, ok := r.cache.get(stableVisualCacheKey(r, visualAsset{URL: imageURL})); ok {
+		t.Fatalf("vision failure fallback entered stable cache: %q", cached)
+	}
+	calls := 0
+	got, _, err := transformOpenAIRequest(raw, r, func(visualAsset, string) (string, error) {
+		calls++
+		return "fresh OCR", nil
+	})
+	if err != nil || calls != 1 || !strings.Contains(string(got), "fresh OCR") {
+		t.Fatalf("calls=%d err=%v body=%s", calls, err, got)
 	}
 }

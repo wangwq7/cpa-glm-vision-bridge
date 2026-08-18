@@ -1,5 +1,5 @@
 PLUGIN_ID := glm-vision-bridge
-VERSION ?= 1.1.1
+VERSION ?= 1.1.2
 GO ?= go
 DIST := dist
 BINARY := $(DIST)/$(PLUGIN_ID).so

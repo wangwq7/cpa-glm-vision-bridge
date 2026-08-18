@@ -170,6 +170,42 @@ func BenchmarkPrepareFinalCheckpointReuse(b *testing.B) {
 	}
 }
 
+func BenchmarkTransformSeventyThreeCachedHistoricalImages(b *testing.B) {
+	cfg := testRuntime()
+	cfg.cache.close()
+	cfg.cache = newMemoCache(256, "")
+	defer cfg.cache.close()
+	content := make([]any, 0, 73)
+	for index := 0; index < 73; index++ {
+		imageURL := "data:image/png;base64," + strings.Repeat("A", 220000) + fmt.Sprintf("%08d", index)
+		content = append(content, map[string]any{
+			"type":      "image_url",
+			"image_url": map[string]any{"url": imageURL},
+		})
+		cfg.cache.set(stableVisualCacheKey(cfg, visualAsset{URL: imageURL}), "vision", strings.Repeat("recognized ", 100), cacheTTL(cfg))
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"model": "glm-vision-bridge",
+		"messages": []any{
+			map[string]any{"role": "user", "content": content},
+			map[string]any{"role": "assistant", "content": "done"},
+			map[string]any{"role": "user", "content": "continue the document"},
+		},
+	})
+	b.ReportAllocs()
+	b.SetBytes(int64(len(raw)))
+	b.ResetTimer()
+	for range b.N {
+		got, count, err := transformOpenAIRequest(raw, cfg, func(visualAsset, string) (string, error) {
+			b.Fatal("cached historical benchmark called vision")
+			return "", nil
+		})
+		if err != nil || count != 73 || strings.Contains(string(got), "data:image") {
+			b.Fatalf("bytes=%d count=%d err=%v", len(got), count, err)
+		}
+	}
+}
+
 func BenchmarkTransformManyArchivedImages(b *testing.B) {
 	cfg := testRuntime()
 	defer cfg.cache.close()

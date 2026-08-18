@@ -45,6 +45,24 @@ func visualCacheKey(cfg runtimeConfig, asset visualAsset, contextText string) st
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+func stableVisualCacheKey(cfg runtimeConfig, asset visualAsset) string {
+	if !strings.HasPrefix(strings.TrimSpace(asset.URL), "data:") {
+		return ""
+	}
+	profile := make([]string, 0, len(cfg.VisionModels))
+	for _, item := range cfg.VisionModels {
+		profile = append(profile, fmt.Sprintf("%s:%t:%d:%d:%d", item.Model, item.active(), item.ContextLimit, item.ContextBudget, item.TimeoutSeconds))
+	}
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, "vision-stable-v1\x00")
+	_, _ = io.WriteString(hash, strings.Join(profile, "\x1f"))
+	_, _ = io.WriteString(hash, "\x00")
+	_, _ = io.WriteString(hash, cfg.VisionPrompt)
+	_, _ = io.WriteString(hash, "\x00")
+	_, _ = io.WriteString(hash, asset.URL)
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 func estimateTokens(text string) int { return (len([]rune(text)) + 2) / 3 }
 
 func lowThinkingModel(model string) string {

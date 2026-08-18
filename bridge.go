@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -24,11 +25,14 @@ func preparePrimaryBody(raw []byte, protocol string, cfg runtimeConfig, callback
 	body, images, err := transformRequestWithPlanAndMediaHint(body, adapter.protocol, cfg, mayContainMedia, func(asset visualAsset, contextText string) (string, error) {
 		return describeImage(cfg, callbackID, asset, contextText, event)
 	}, func(plan visualTransformPlan) {
-		processedImagesForTurn = plan.CurrentImages + plan.RestoredImages
+		processedImagesForTurn = plan.CurrentImages + plan.RestoredImages + plan.PersistentImages
 		if plan.HistoricalImages == 0 {
 			return
 		}
-		detail := fmt.Sprintf("检测到 %d 张历史图片：%d 张替换为固定短归档标记，%d 张因本轮明确引用而恢复；当前轮图片 %d 张。", plan.HistoricalImages, plan.ArchivedImages, plan.RestoredImages, plan.CurrentImages)
+		detail := fmt.Sprintf("检测到 %d 张历史图片：%d 张复用持久视觉记忆，%d 张替换为固定短归档标记，%d 张因本轮明确引用而恢复；当前轮图片 %d 张。", plan.HistoricalImages, plan.PersistentImages, plan.ArchivedImages, plan.RestoredImages, plan.CurrentImages)
+		if plan.OmittedMemories > 0 {
+			detail += fmt.Sprintf(" %d 条较早记忆因总预算被省略。", plan.OmittedMemories)
+		}
 		if plan.RestoredImages == 0 {
 			detail += " 未解码旧图，也未调用视觉模型。"
 		}
@@ -41,12 +45,14 @@ func preparePrimaryBody(raw []byte, protocol string, cfg runtimeConfig, callback
 	if err != nil {
 		return nil, images, err
 	}
-	detail := "本轮相关图片已转换为视觉记忆，并加入不得仅为重复读取这些图片而调用客户端工具的约束。"
+	detail := "本轮相关图片已转换为视觉记忆，并注入不依赖工具名称的防重复读取策略。"
 	if toolPolicy.ConstrainedViewImage {
 		detail += " view_image 已保留并附加按需重分析引导。"
 	}
 	if toolPolicy.ConstrainedTools > 0 {
 		detail += fmt.Sprintf(" 已为 %d 个 shell_command/js 工具定义补充同一约束。", toolPolicy.ConstrainedTools)
+	} else {
+		detail += " 本轮未匹配到可安全修改的工具定义，未改动未知工具。"
 	}
 	detail += " 其他工具仍可用于用户明确要求的代码、文件、系统、外部资源或图片处理操作。"
 	cfg.events.stage(event, "约束重复看图工具", "完成", cfg.PrimaryModel, detail, time.Now())
@@ -55,9 +61,17 @@ func preparePrimaryBody(raw []byte, protocol string, cfg runtimeConfig, callback
 func describeImage(cfg runtimeConfig, callbackID string, asset visualAsset, contextText string, event *bridgeEvent) (string, error) {
 	// transformRequest validates every selected image before any visual call.
 	key := visualCacheKey(cfg, asset, contextText)
-	if key != "" {
+	reanalysis := explicitVisualReanalysisRequested(contextText)
+	if key != "" && !reanalysis {
 		if cached, ok := cfg.cache.get(key); ok {
 			cfg.events.stage(event, "读取视觉记忆缓存", "完成", "缓存", "同一图片命中本地内存缓存，未再次调用视觉模型。", time.Now())
+			return cached, nil
+		}
+	}
+	stableKey := stableVisualCacheKey(cfg, asset)
+	if stableKey != "" && !reanalysis {
+		if cached, ok := cfg.cache.get(stableKey); ok && strings.TrimSpace(cached) != "" {
+			cfg.events.stage(event, "读取持久视觉记忆", "完成", "缓存", "同一图片命中稳定记忆索引，未再次调用视觉模型。", time.Now())
 			return cached, nil
 		}
 	}

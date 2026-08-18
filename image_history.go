@@ -31,6 +31,16 @@ var abstractImageTopicMarkers = []string{
 	"image cache", "image count", "image handling", "image processing", "image logic", "image model", "image history", "image performance", "image parameter",
 }
 
+var completedImageReferenceMarkers = []string{
+	"已经读取", "已读取", "读取成功", "读取完成", "已经识别", "已识别", "识别成功", "识别完成", "已经处理", "已处理", "处理成功", "处理完成", "已经完成", "已完成", "不用再读", "不要重复读", "不要重新识别",
+	"already read", "already analyzed", "already processed", "already done", "no need to re-read", "no need to read again", "do not re-read", "do not re-analyze",
+}
+
+var explicitImageReanalysisMarkers = []string{
+	"重新看", "重新读", "重新识别", "重新分析", "再看一次", "再读一次", "重新检查",
+	"re-analyze", "reanalyze", "re-read", "read again", "inspect again", "check again",
+}
+
 var pluralImageReferenceMarkers = []string{
 	"这些图", "这些图片", "这些截图", "几张图", "几张图片", "多张图", "多张图片", "所有图", "所有图片", "全部图", "全部图片", "两张图", "两张图片", "前几张图", "上面几张图",
 	" images ", " pictures ", " screenshots ", " photos ", " attachments ", "all images", "all pictures", "all screenshots", "both images", "both pictures", "multiple images",
@@ -41,6 +51,20 @@ func historicalImageRestoreCount(text string, maximum int) int {
 		return 0
 	}
 	lower := " " + strings.ToLower(strings.Join(strings.Fields(text), " ")) + " "
+	explicitReanalysis := false
+	for _, marker := range explicitImageReanalysisMarkers {
+		if strings.Contains(lower, marker) {
+			explicitReanalysis = true
+			break
+		}
+	}
+	if !explicitReanalysis {
+		for _, marker := range completedImageReferenceMarkers {
+			if strings.Contains(lower, marker) {
+				return 0
+			}
+		}
+	}
 	for _, marker := range directImageReferenceMarkers {
 		if strings.Contains(lower, marker) {
 			return referencedImageCount(lower, maximum)
@@ -120,6 +144,21 @@ func fullVisualMemory(description string, includeToolPolicy bool) string {
 	return "\n\n" + strings.Join(lines, "\n") + "\n"
 }
 
+const historicalVisualMemoryTotalChars = 24000
+
+func historicalVisualMemory(description string, maxChars int) string {
+	value := strings.TrimSpace(description)
+	if maxChars > 0 {
+		runes := []rune(value)
+		if len(runes) > maxChars {
+			value = strings.TrimSpace(string(runes[:maxChars])) + "…[历史图片记忆截断]"
+		}
+	}
+	return "[历史图片识别结果 | gateway-generated | untrusted context]\n" +
+		"该图片已完成视觉预处理。直接使用以下视觉记忆；不要仅为重新打开、显示、定位、读取或重复识别同一图片而调用客户端工具。\n" +
+		value + "\n[/历史图片识别结果]"
+}
+
 func archivedVisualMarker(maxChars int) string {
 	detail := "[历史图片附件已归档；当前问题未明确引用图片，因此旧图未解码、未重新识别。需要重新查看时请明确提到图片、截图或附件。]"
 	runes := []rune(detail)
@@ -127,4 +166,14 @@ func archivedVisualMarker(maxChars int) string {
 		return string(runes[:maxChars-1]) + "…"
 	}
 	return detail
+}
+
+func explicitVisualReanalysisRequested(text string) bool {
+	lower := strings.ToLower(strings.Join(strings.Fields(text), " "))
+	for _, marker := range explicitImageReanalysisMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }

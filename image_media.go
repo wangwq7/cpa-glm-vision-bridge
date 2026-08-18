@@ -162,10 +162,46 @@ func latestUserTurn(root any, provided ...protocolAdapter) (int, string) {
 	for index := len(items) - 1; index >= 0; index-- {
 		item, _ := items[index].(map[string]any)
 		if item["role"] == "user" {
-			return index, directUserText(item)
+			text := strings.TrimSpace(directUserText(item))
+			if text == "" && historyItemContainsToolResult(item) {
+				continue
+			}
+			return index, text
 		}
 	}
 	return -1, ""
+}
+
+func splitCurrentVisualBatch(root any, adapter protocolAdapter, userIndex int, assets []visualAsset) ([]visualAsset, []visualAsset) {
+	latestIndex := userIndex
+	for _, asset := range assets {
+		if asset.ItemIndex > latestIndex {
+			latestIndex = asset.ItemIndex
+		}
+	}
+	batchStart := latestIndex
+	if latestIndex > userIndex {
+		items := adapter.conversationItems(root)
+		if latestIndex >= 0 && latestIndex < len(items) && historyItemContainsToolResult(items[latestIndex]) {
+			for batchStart > userIndex+1 && historyItemContainsToolResult(items[batchStart-1]) {
+				batchStart--
+			}
+		}
+	}
+	current := make([]visualAsset, 0)
+	historical := make([]visualAsset, 0)
+	for _, asset := range assets {
+		isCurrent := asset.ItemIndex == userIndex
+		if latestIndex > userIndex {
+			isCurrent = asset.ItemIndex >= batchStart && asset.ItemIndex <= latestIndex
+		}
+		if isCurrent {
+			current = append(current, asset)
+		} else {
+			historical = append(historical, asset)
+		}
+	}
+	return current, historical
 }
 
 func conversationItems(root any, provided ...protocolAdapter) []any {
