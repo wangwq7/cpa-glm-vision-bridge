@@ -4,7 +4,7 @@
 
 GLM Vision Bridge 将图片交给独立视觉模型转写，再把受控的视觉文本交给主文本模型完成推理和回答。客户端始终使用同一个公开模型，不需要感知内部路由。
 
-> 1.0 使用全新的插件 ID、文件名和配置结构，需要全新安装。已在 CLIProxyAPI v7.2.119、Linux amd64 环境完成文本、图片、多轮和流式验证。
+> 1.1.3 使用独立的插件 ID、文件名和配置结构。已在 CLIProxyAPI v7.2.119、Linux amd64 环境完成文本、图片、多轮、流式及管理页面安全边界验证。
 
 
 ---
@@ -137,7 +137,7 @@ plugins:
 重启后确认日志包含：
 
 ```text
-GLM Vision Bridge version=1.0.0
+GLM Vision Bridge version=1.1.3
 ```
 
 然后检查模型列表：

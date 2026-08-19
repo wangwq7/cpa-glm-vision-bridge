@@ -19,7 +19,6 @@ const (
 	modelCatalogCacheTTL     = 15 * time.Second
 	modelCatalogTimeout      = 2 * time.Second
 	defaultCPAManagementPort = 8317
-	managementDataMarker     = "__GLM_VISION_BRIDGE_DATA__"
 )
 
 //go:embed web/management.html
@@ -213,18 +212,6 @@ func cpaLocalAPISettings(configYAML []byte) (int, string) {
 	return port, ""
 }
 
-func managementHTML(cfg runtimeConfig) string {
-	events := cfg.events.snapshot()
-	sortEventsForDisplay(events)
-	payload, _ := json.Marshal(struct {
-		Config dashboardConfig `json:"config"`
-		Models []string        `json:"models"`
-		Events []bridgeEvent   `json:"events"`
-	}{
-		Config: dashboardConfigFrom(cfg),
-		Models: currentModelCatalog(cfg),
-		Events: events,
-	})
-	safeJSON := strings.NewReplacer("<", "\\u003c", ">", "\\u003e", "&", "\\u0026").Replace(string(payload))
-	return strings.Replace(managementTemplate, managementDataMarker, safeJSON, 1)
+func managementHTML() string {
+	return managementTemplate
 }

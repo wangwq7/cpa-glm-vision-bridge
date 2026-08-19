@@ -500,10 +500,7 @@ func TestViewImageGuidancePreservedAcrossProtocols(t *testing.T) {
 }
 
 func TestManagementPageMatchesV1Contract(t *testing.T) {
-	runtime := testRuntime()
-	runtime.VisionModels[0].TimeoutSeconds = 30
-	runtime.VisionCancelGraceSeconds = 25
-	html := managementHTML(runtime)
+	html := managementHTML()
 
 	for _, want := range []string{
 		"GLM Vision Bridge",
@@ -519,11 +516,10 @@ func TestManagementPageMatchesV1Contract(t *testing.T) {
 		"public_model",
 		"primary_output_token_limit",
 		"vision_cancel_grace_seconds",
-		`"version":"1.1.2"`,
-		`"timeout_seconds":30`,
-		`"vision_cancel_grace_seconds":25`,
 		`fetch('/v0/management/plugins/glm-vision-bridge/config'`,
 		`method:'PATCH'`,
+		`localStorage.getItem('cli-proxy-auth')`,
+		`localStorage.getItem('managementKey')`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing %q", want)
@@ -535,13 +531,12 @@ func TestManagementPageMatchesV1Contract(t *testing.T) {
 		"vision_backup_model_1",
 		"strict_vision_failure",
 		"vision_output_tokens",
+		"管理密钥",
+		"__GLM_VISION_BRIDGE_DATA__",
 	} {
 		if strings.Contains(html, stale) {
 			t.Fatalf("stale management contract %q is still present", stale)
 		}
-	}
-	if strings.Contains(html, managementDataMarker) {
-		t.Fatal("management data marker was not replaced")
 	}
 }
 func TestRenderManagementPreview(t *testing.T) {
@@ -549,7 +544,7 @@ func TestRenderManagementPreview(t *testing.T) {
 	if path == "" {
 		t.Skip("VB_PREVIEW_PATH is not set")
 	}
-	if err := os.WriteFile(path, []byte(managementHTML(testRuntime())), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(managementHTML()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -43,15 +43,17 @@ func managementHandle(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
-	cfg := currentConfig()
 	switch {
 	case strings.HasSuffix(req.Path, "/events"):
+		cfg := currentConfig()
 		return managementJSONResponse(cfg.events.snapshot())
 	case strings.HasSuffix(req.Path, "/model-catalog"):
+		cfg := currentConfig()
 		return managementJSONResponse(currentModelCatalog(cfg))
 	case strings.HasSuffix(req.Path, "/config"):
+		cfg := currentConfig()
 		return managementJSONResponse(dashboardConfigFrom(cfg))
 	default:
-		return okEnvelope(managementResponse{StatusCode: 200, Headers: http.Header{"content-type": []string{"text/html; charset=utf-8"}, "cache-control": []string{"no-store"}}, Body: []byte(managementHTML(cfg))})
+		return okEnvelope(managementResponse{StatusCode: 200, Headers: http.Header{"content-type": []string{"text/html; charset=utf-8"}, "cache-control": []string{"no-store"}}, Body: []byte(managementHTML())})
 	}
 }
