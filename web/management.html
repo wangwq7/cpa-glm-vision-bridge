@@ -296,7 +296,7 @@ try{const $=s=>document.querySelector(s);
 managementKey=managementKey||storedManagementKey();
 if(!managementKey)throw new Error('未检测到管理中心登录凭据，请从已登录的 CPA 管理中心打开此页面');
 const h={Authorization:'Bearer '+managementKey};
-const fk=async(u)=>{const r=await fetch(u,h);if(!r.ok)throw r.status+':'+await r.text();return r.json()};
+const fk=async(u)=>{const r=await fetch(u,{headers:h});if(!r.ok)throw r.status+':'+await r.text();return r.json()};
 const [cfg,models,evts]=await Promise.all([fk('/v0/management/glm-vision-bridge/config'),fk('/v0/management/glm-vision-bridge/model-catalog'),fk('/v0/management/glm-vision-bridge/events')]);
 D={config:cfg,models:models||[],events:evts||[]};
 c=D.config;ml=[...new Set(D.models||[])].sort();ev=D.events||[];

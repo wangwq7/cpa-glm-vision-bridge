@@ -9,13 +9,23 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-func TestReleaseVersionMatchesMakefile(t *testing.T) {
-	raw, err := os.ReadFile("Makefile")
-	if err != nil {
-		t.Fatal(err)
+func TestReleaseVersionMatchesPublishedFiles(t *testing.T) {
+	checks := []struct {
+		path   string
+		marker string
+	}{
+		{path: "Makefile", marker: "VERSION ?= " + defaultVersion},
+		{path: "README.md", marker: "GLM Vision Bridge version=" + defaultVersion},
+		{path: "release-notes-v" + defaultVersion + ".md", marker: "# GLM Vision Bridge v" + defaultVersion},
 	}
-	if !strings.Contains(string(raw), "VERSION ?= "+defaultVersion) {
-		t.Fatalf("Makefile version does not match plugin version %s", defaultVersion)
+	for _, check := range checks {
+		raw, err := os.ReadFile(check.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), check.marker) {
+			t.Fatalf("%s does not match plugin version %s", check.path, defaultVersion)
+		}
 	}
 }
 
@@ -69,6 +79,7 @@ func TestManagementShellReusesStoredCredentialWithoutPasswordField(t *testing.T)
 		"localStorage.getItem('managementKey')",
 		"enc::v1::",
 		"Authorization:'Bearer '+managementKey",
+		"fetch(u,{headers:h})",
 		"window.__loadMgmtData();",
 	} {
 		if !strings.Contains(html, want) {
@@ -79,6 +90,7 @@ func TestManagementShellReusesStoredCredentialWithoutPasswordField(t *testing.T)
 		`id="mkey"`,
 		`type="password"`,
 		"管理密钥",
+		"fetch(u,h)",
 	} {
 		if strings.Contains(html, forbidden) {
 			t.Fatalf("management shell still contains password UI %q", forbidden)
